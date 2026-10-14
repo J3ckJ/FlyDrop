@@ -1,10 +1,57 @@
-# FlyDrop
+<p align="center">
+  <img src="public/icons/icon-512.png" width="112" alt="Иконка FlyDrop">
+</p>
 
-Файлы и текст между Windows и iPhone. Одна Wi-Fi сеть, без облака.
+<h1 align="center">FlyDrop</h1>
 
-Windows работает как отдельное приложение. iPhone открывает FlyDrop в Safari или с иконки на экране «Домой». Всё проходит через ваш компьютер: после установки интернет не нужен.
+<p align="center">
+  Файлы и текст между Windows и iPhone.<br>
+  Одна Wi-Fi сеть · без облака · без аккаунта
+</p>
 
-> Local file and text sharing between a Windows PC and an iPhone on the same Wi-Fi. No cloud, no account.
+<p align="center">
+  <a href="https://github.com/J3ckJ/FlyDrop/releases/latest"><img src="https://img.shields.io/github/v/release/J3ckJ/FlyDrop" alt="Release"></a>
+  <img src="https://img.shields.io/badge/Windows-10%2F11-0078D6?logo=windows&logoColor=white" alt="Windows">
+  <img src="https://img.shields.io/badge/iPhone-Safari-000000?logo=apple&logoColor=white" alt="iPhone Safari">
+  <img src="https://img.shields.io/badge/Electron-Node.js%2022-47848F?logo=electron&logoColor=white" alt="Electron">
+</p>
+
+> **Статус:** ранняя версия 0.3.0 · Windows + iPhone · проект не связан с Apple Inc. и Microsoft
+
+## Что это
+
+FlyDrop передаёт файлы и текст между компьютером с Windows и iPhone в одной
+Wi-Fi сети. Всё проходит через ваш компьютер: облака, аккаунта и интернета
+после установки не нужно.
+
+- **На Windows** — отдельное приложение, которое живёт в трее.
+- **На iPhone** — страница в Safari или иконка на экране «Домой». Ставить
+  ничего из App Store не нужно.
+- **Защищённое соединение**: свой сертификат HTTPS у каждой установки и код
+  подтверждения для каждого нового устройства.
+
+## Скачать
+
+Файл лежит на странице
+[последнего выпуска](https://github.com/J3ckJ/FlyDrop/releases/latest).
+
+| Система | Файл |
+|---|---|
+| Windows (64 бит), portable | [FlyDrop-0.3.0-Windows.exe](https://github.com/J3ckJ/FlyDrop/releases/latest/download/FlyDrop-0.3.0-Windows.exe) |
+| iPhone | ничего не скачивается, открывается в Safari по QR-коду с компьютера |
+
+Установщика нет: это один `.exe`, Node.js не нужен. Положите его в постоянную
+папку и запустите. У сборки нет подписи издателя, поэтому Windows SmartScreen
+может показать «Система Windows защитила ваш компьютер» — нажмите
+**Подробнее**, затем **Выполнить в любом случае**.
+
+## Что нужно
+
+- компьютер с **Windows**;
+- **iPhone** с Safari;
+- оба устройства в **одной сети, которой вы доверяете** (не гостевой Wi-Fi
+  с изоляцией клиентов);
+- один раз настроить доверие к сертификату на iPhone (ниже, 5 минут).
 
 ## Четыре раздела
 
@@ -17,9 +64,10 @@ Windows работает как отдельное приложение. iPhone 
 | 3 | **Безопасность** | Код подключения, доверенные устройства, папка, автозапуск |
 | 4 | **Как это работает** | Короткая схема: сеть, QR, обмен в обе стороны |
 
-Запрос нового устройства остаётся наверху на любом разделе: код видно сразу, не нужно искать его внизу страницы. Кнопка **EN / RU** в шапке переключает язык и запоминает выбор.
+Запрос нового устройства остаётся наверху на любом разделе: код видно сразу.
+Кнопка **EN / RU** в шапке переключает язык и запоминает выбор.
 
-## Как открыть на Windows
+## Windows: первый запуск
 
 Готовый файл — `FlyDrop-0.3.0-Windows.exe`. Node.js на этом компьютере не нужен.
 
@@ -69,9 +117,9 @@ Windows работает как отдельное приложение. iPhone 
 
 Отзыв доступа закрывает сеанс и удаляет временные файлы на компьютере. Копию, которую получатель уже сохранил у себя, отозвать нельзя.
 
-## Если не соединяется
+## Частые вопросы
 
-Проверьте общую сеть, что приложение открыто, что выбран обычный адаптер и что код ещё не истёк. Новый код и QR сбрасывают ожидающие запросы; уже разрешённые устройства остаются, пока их не отозвать.
+**Не соединяется.** Проверьте общую сеть, что приложение открыто, что выбран обычный адаптер и что код ещё не истёк. Новый код и QR сбрасывают ожидающие запросы; уже разрешённые устройства остаются, пока их не отозвать.
 
 Порт **4317** — страница настройки. Порт **4318** — сама передача. Если брандмауэр спрашивает разрешение, дайте его только частной сети. Гостевой Wi-Fi с изоляцией клиентов и VPN часто мешают. FlyDrop сам порты не открывает и правила брандмауэра не меняет. В интернет эти порты выставлять не нужно.
 
@@ -91,10 +139,30 @@ npm.cmd run build:win
 
 `node server.js` без Electron не умеет защищённое хранилище. Запускайте через `npm.cmd start`.
 
-Это локальный обмен в вашей сети, не AirDrop: нет Bluetooth, интернета и подписи издателя Windows. Независимого аудита у сборки нет.
+
+## Ограничения
+
+- Это локальный обмен в вашей сети, не AirDrop: нет Bluetooth и интернета.
+- Передача идёт, только пока приложение на Windows запущено.
+- У `.exe` нет подписи издателя Windows. Независимого аудита у сборки нет.
+- Готовая сборка есть только для Windows.
 
 ## Автор
 
 Евгений Любкин
 
 [Threads](https://www.threads.net/@j3ckj) · [Telegram](https://t.me/el_patch_notes) · [GitHub](https://github.com/j3ckj)
+
+## English summary
+
+**FlyDrop** shares files and text between a Windows PC and an iPhone on the
+same Wi-Fi. No cloud, no account. The Windows app lives in the tray; the
+iPhone uses Safari (or a Home Screen icon) over HTTPS with a per-install
+certificate and a pairing code for every new device.
+
+Download the portable
+[FlyDrop-0.3.0-Windows.exe](https://github.com/J3ckJ/FlyDrop/releases/latest/download/FlyDrop-0.3.0-Windows.exe)
+from [the latest release](https://github.com/J3ckJ/FlyDrop/releases/latest).
+The build is unsigned: on SmartScreen click **More info**, then **Run anyway**.
+Build from source with Node.js 22+: `npm ci`, `npm start`, `npm test`,
+`npm run build:win`.
