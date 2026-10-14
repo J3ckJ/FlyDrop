@@ -1,0 +1,59 @@
+{
+  "name": "flydrop",
+  "version": "0.3.0",
+  "main": "desktop/main.cjs",
+  "author": "FlyDrop",
+  "private": true,
+  "type": "module",
+  "description": "Local file and text sharing between Windows and iPhone",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test",
+    "desktop": "electron .",
+    "desktop:smoke": "electron . --smoke-test",
+    "icons": "node scripts/icons.cjs",
+    "build:win": "node scripts/package-win.cjs"
+  },
+  "dependencies": {
+    "@peculiar/x509": "^2.1.0",
+    "qrcode": "^1.5.4",
+    "reflect-metadata": "^0.2.2"
+  },
+  "build": {
+    "appId": "local.flydrop.windows",
+    "productName": "FlyDrop",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "desktop/**",
+      "server.js",
+      "security.js",
+      "public/**",
+      "build/tray.png",
+      "build/icon.ico",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "portable": {
+      "artifactName": "FlyDrop-${version}-Windows.exe"
+    }
+  },
+  "devDependencies": {
+    "@electron/asar": "4.0.1",
+    "electron": "^44.7.2",
+    "electron-builder": "26.15.3",
+    "pngjs": "7.0.0"
+  }
+}
