@@ -12,6 +12,7 @@
     "test": "node --test"
   },
   "dependencies": {
+    "qrcode": "^1.5.4",
     "web-push": "^3.6.7"
   }
 }

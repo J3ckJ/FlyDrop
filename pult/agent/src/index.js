@@ -1,7 +1,8 @@
 import os from 'node:os';
 import path from 'node:path';
+import QRCode from 'qrcode';
 import { createAgent } from './agent.js';
-import { privateIPv4 } from './mdns.js';
+import { ensureWindowsFirewall } from './firewall.js';
 import { openStore } from './store.js';
 
 function flag(name) {
@@ -37,22 +38,44 @@ const agent = await createAgent({
 });
 
 const fly = agent.fly?.info?.() || null;
+const primary = agent.lan.phone[0];
+const phoneUrl = primary ? `https://${primary.address}:${agent.port}/` : '';
 console.log('');
 console.log('  Пульт');
 console.log(`  Компьютер: ${agent.name} · ${agent.os}`);
 console.log(`  Код сопряжения: ${agent.pairingCode}`);
 console.log(`  Порт: ${agent.port}  ·  только локальная сеть`);
-const addresses = privateIPv4();
-for (const address of addresses) console.log(`  iPhone: https://${address}:${agent.port}/`);
-if (!addresses.length) console.log(`  iPhone: https://<адрес компьютера>:${agent.port}/`);
+if (primary) {
+  console.log(`  iPhone: ${phoneUrl}`);
+  console.log(`  Адаптер: ${primary.name}`);
+  if (agent.lan.foreignGateway) console.log('  Шлюз по умолчанию смотрит не в этот адаптер. iPhone должен быть в той же сети, что и адрес выше.');
+  else if (!agent.lan.gateway) console.log('  Шлюз по умолчанию не найден. Если сетей несколько, сверьте адрес с Wi-Fi компьютера.');
+  const qr = await QRCode.toString(phoneUrl, { type: 'utf8', errorCorrectionLevel: 'M', margin: 2 });
+  console.log(qr.split('\n').map(line => (line ? `  ${line}` : '')).join('\n'));
+  const extraLabel = agent.lan.gateway ? 'Другая сеть со шлюзом' : 'Ещё физический адаптер';
+  for (const extra of agent.lan.phone.slice(1)) console.log(`  ${extraLabel}: https://${extra.address}:${agent.port}/  ·  ${extra.name}`);
+} else {
+  console.log(`  iPhone: https://<адрес Wi-Fi компьютера>:${agent.port}/`);
+  console.log('  Не найден адаптер Wi-Fi или Ethernet в локальной сети.');
+}
+if (agent.lan.skipped.length) {
+  console.log('  Не открывайте эти адреса на iPhone — это виртуальные или локальные адаптеры:');
+  for (const item of agent.lan.skipped) console.log(`    ${item.name}  ${item.address}  ·  ${item.reason === 'link-local' ? '169.254, связи нет' : 'виртуальный адаптер'}`);
+}
 console.log(`  На этом компьютере: https://localhost:${agent.port}/`);
 console.log(`  Отпечаток: ${agent.fingerprint}`);
 if (agent.mac) console.log(`  MAC для Wake-on-LAN: ${agent.mac}`);
 if (fly?.external) console.log(`  FlyDrop уже запущен: https://…:${fly.httpsPort} — подтвердите телефон в его окне`);
 else if (fly) console.log(`  FlyDrop внутри Пульта: HTTPS ${fly.httpsPort}, файлы до 1 ГБ`);
 else console.log('  FlyDrop выключен');
+const firewall = await ensureWindowsFirewall({
+  ports: [agent.port, fly?.httpsPort].filter(Boolean),
+  adapterName: primary?.name,
+});
+for (const note of firewall.notes) console.log(`  ${note}`);
 console.log('');
 console.log('  Телефон вводит этот код. Без кода управление недоступно.');
+console.log('  Телефон и компьютер — в одной Wi-Fi. Сканируйте код или откройте строку iPhone.');
 console.log('  Ctrl+C завершает работу.');
 console.log('');
 

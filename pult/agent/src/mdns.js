@@ -1,7 +1,7 @@
 import dgram from 'node:dgram';
 import os from 'node:os';
+import { describeAdapters } from './lan.js';
 import { SERVICE_TYPE } from './protocol.js';
-import { isPrivateIPv4 } from './net.js';
 
 function encodeName(name) {
   const labels = name.replace(/\.$/, '').split('.');
@@ -67,22 +67,12 @@ export function buildAnnouncement({ instance, host, port, addresses, txt, ttl = 
 }
 
 export function privateIPv4() {
-  const found = [];
-  for (const entries of Object.values(os.networkInterfaces())) {
-    for (const entry of entries || []) {
-      if (entry.family === 'IPv4' && !entry.internal && isPrivateIPv4(entry.address)) found.push(entry.address);
-    }
-  }
-  return [...new Set(found)];
+  return describeAdapters(os.networkInterfaces(), []).phone.map(adapter => adapter.address);
 }
 
 export function primaryMac() {
-  for (const entries of Object.values(os.networkInterfaces())) {
-    for (const entry of entries || []) {
-      if (entry.family === 'IPv4' && !entry.internal && entry.mac && entry.mac !== '00:00:00:00:00:00') return entry.mac;
-    }
-  }
-  return null;
+  const { phone } = describeAdapters(os.networkInterfaces(), []);
+  return phone.find(adapter => adapter.mac)?.mac || null;
 }
 
 export function advertise({ instance, host, port, txt, addresses = privateIPv4() }) {

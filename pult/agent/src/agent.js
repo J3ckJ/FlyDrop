@@ -5,7 +5,8 @@ import { emptyVault, generateTLS } from '../../../security.js';
 import { createHttpHandler } from './http.js';
 import { encodeFrame } from './jpeg.js';
 import { createPush } from './push.js';
-import { advertise, primaryMac, privateIPv4 } from './mdns.js';
+import { currentLan } from './lan.js';
+import { advertise, primaryMac } from './mdns.js';
 import { isAllowedPeer, plainIP } from './net.js';
 import { startFlydrop } from './flydrop-bridge.js';
 import { createPlatform } from './platform/index.js';
@@ -32,7 +33,8 @@ export async function createAgent(options = {}) {
   const store = options.store || await openStore(directory);
   const name = options.name || os.hostname() || 'Компьютер';
   const osName = options.os || (platform.kind === 'mock' ? (options.mockOs || 'windows') : platform.kind === 'macos' ? 'macos' : platform.kind === 'windows' ? 'windows' : 'linux');
-  const addresses = privateIPv4();
+  const lan = options.lan || await currentLan();
+  const addresses = lan.phone.map(adapter => adapter.address);
   const vault = emptyVault();
   vault.hostName = name;
   const material = await generateTLS(vault, addresses);
@@ -40,7 +42,7 @@ export async function createAgent(options = {}) {
   const attempts = new Map();
   let pairingCode = options.pairingCode || newCode();
   let transfer = { active: false, name: '', loaded: 0, total: 0, state: 'idle' };
-  const mac = options.mac || primaryMac();
+  const mac = options.mac || lan.phone.find(adapter => adapter.mac)?.mac || primaryMac();
   const nowFn = options.now || (() => new Date());
 
   const fly = options.flydrop === false ? null : await startFlydrop({
@@ -307,7 +309,7 @@ export async function createAgent(options = {}) {
     instance: name.replace(/[^\w\- .а-яА-ЯёЁ]/gu, '').trim() || 'Pult',
     host: `${vault.hostId.slice(0, 8)}.local`,
     port,
-    addresses: addresses.length ? addresses : ['127.0.0.1'],
+    addresses,
     txt: { os: osName, ver: '1', fp: material.fingerprint.replaceAll(':', '').slice(0, 16), fly: String(fly?.info().httpsPort || 0) },
   });
 
@@ -330,6 +332,7 @@ export async function createAgent(options = {}) {
     name,
     os: osName,
     mac,
+    lan,
     fingerprint: material.fingerprint,
     ca: material.ca,
     material,
