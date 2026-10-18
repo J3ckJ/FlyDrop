@@ -1,8 +1,16 @@
 @echo off
 cd /d "%~dp0"
-where node >nul 2>nul
-if errorlevel 1 (
-  echo Нужен Node.js 22 или новее: https://nodejs.org
-  exit /b 1
+if exist "%~dp0pult.exe" (
+  "%~dp0pult.exe" %*
+  exit /b %errorlevel%
 )
-node src\index.js %*
+if exist "%~dp0..\dist\pult.exe" (
+  "%~dp0..\dist\pult.exe" %*
+  exit /b %errorlevel%
+)
+echo Нет pult.exe рядом с этим файлом.
+echo Скачайте артефакт сборки GitHub Actions «Pult Windows» или соберите:
+echo   cd pult
+echo   set CGO_ENABLED=0
+echo   go build -trimpath -o pult.exe .\win\cmd\pult
+exit /b 1

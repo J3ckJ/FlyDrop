@@ -1,0 +1,49 @@
+name: Pult Windows
+
+on:
+  push:
+    branches:
+      - cursor/pult-iphone-remote-3490
+  pull_request:
+
+jobs:
+  exe:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pult
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+      - name: Test the protocol and the server on Linux
+        run: go test ./...
+      - name: Cross-compile pult.exe
+        run: CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -o dist/pult.exe ./win/cmd/pult
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pult-windows-amd64
+          path: pult/dist/pult.exe
+          if-no-files-found: error
+
+  # Authenticode runs only after a certificate is stored as a base64 secret PULT_CERT_PFX
+  # and PULT_CERT_PASSWORD. Until then this job is skipped and the unsigned exe above is the artifact.
+  sign:
+    needs: exe
+    if: ${{ secrets.PULT_CERT_PFX != '' }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pult-windows-amd64
+      - name: Sign pult.exe
+        shell: pwsh
+        run: |
+          $bytes = [Convert]::FromBase64String("${{ secrets.PULT_CERT_PFX }}")
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\pult.pfx", $bytes)
+          signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$env:RUNNER_TEMP\pult.pfx" /p "${{ secrets.PULT_CERT_PASSWORD }}" .\pult.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pult-windows-amd64-signed
+          path: pult.exe

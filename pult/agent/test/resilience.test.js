@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PassThrough } from 'node:stream';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ensureWindowsFirewall, firewallDisabled, resetFirewallGuard } from '../src/firewall.js';
 import { readDefaultRoutes } from '../src/lan.js';
 import { safeExecFile } from '../src/platform/spawn.js';
@@ -11,7 +13,7 @@ function eperm() {
 }
 
 test('safeExecFile turns a synchronous EPERM into a blocked result', async () => {
-  const result = await safeExecFile('netsh', ['advfirewall', 'show', 'currentprofile'], {
+  const result = await safeExecFile('route', ['print', '-4'], {
     execFileImpl() { throw eperm(); },
   });
   assert.equal(result.blocked, true);
@@ -19,7 +21,7 @@ test('safeExecFile turns a synchronous EPERM into a blocked result', async () =>
 });
 
 test('safeExecFile reports a numeric exit without treating it as a block', async () => {
-  const result = await safeExecFile('netsh', ['advfirewall'], {
+  const result = await safeExecFile('route', ['print'], {
     execFileImpl(_file, _args, _options, callback) {
       callback(Object.assign(new Error('requires elevation'), { code: 1 }), '', 'The requested operation requires elevation.');
       return { on() { return this; } };
@@ -30,7 +32,7 @@ test('safeExecFile reports a numeric exit without treating it as a block', async
 });
 
 test('safeExecFile settles once when the callback and the error event both fire', async () => {
-  const result = await safeExecFile('netsh', [], {
+  const result = await safeExecFile('route', [], {
     execFileImpl(_file, _args, _options, callback) {
       const child = {
         on(event, fn) {
@@ -46,92 +48,20 @@ test('safeExecFile settles once when the callback and the error event both fire'
   assert.equal(result.code, 'EPERM');
 });
 
-test('EPERM, ENOENT and a timeout skip the firewall check without throwing', async () => {
+test('the node firewall helper does not start a program', async () => {
   resetFirewallGuard();
-  let calls = 0;
-  const blocked = async () => {
-    calls += 1;
-    throw eperm();
-  };
-  const first = await ensureWindowsFirewall({ ports: [4720, 4318], adapterName: 'Wi-Fi', platform: 'win32', exec: blocked });
+  const first = await ensureWindowsFirewall({ ports: [4720, 4318], adapterName: 'Wi-Fi', platform: 'win32' });
   assert.equal(first.applied, false);
-  assert.equal(first.blocked, true);
-  const text = first.notes.join('\n');
-  assert.match(text, /EPERM/);
-  assert.match(text, /продолжает работу/);
-  assert.match(text, /netsh advfirewall firewall add rule name="Pult"/);
-  assert.match(text, /localport=4720,4318/);
-  assert.match(text, /--no-firewall/);
-  const second = await ensureWindowsFirewall({ ports: [4720, 4318], adapterName: 'Wi-Fi', platform: 'win32', exec: blocked });
-  assert.equal(calls, 1);
+  assert.equal(first.skipped, true);
+  assert.match(first.notes.join('\n'), /pult\.exe/);
+  const second = await ensureWindowsFirewall({ ports: [4720], adapterName: 'Wi-Fi', platform: 'win32', disabled: true });
   assert.equal(second.skipped, true);
-
-  resetFirewallGuard();
-  const missing = await ensureWindowsFirewall({
-    ports: [4720],
-    adapterName: 'Wi-Fi',
-    platform: 'win32',
-    exec: async () => { throw Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' }); },
-  });
-  assert.match(missing.notes.join('\n'), /ENOENT/);
-  assert.equal(missing.skipped, true);
-
-  resetFirewallGuard();
-  let timeouts = 0;
-  const timed = await ensureWindowsFirewall({
-    ports: [4720],
-    adapterName: 'Wi-Fi',
-    platform: 'win32',
-    exec: async () => {
-      timeouts += 1;
-      return { code: 'ETIMEDOUT', stdout: '', stderr: 'timed out', blocked: true, killed: true };
-    },
-  });
-  assert.match(timed.notes.join('\n'), /таймаут/);
-  await ensureWindowsFirewall({ ports: [4720], adapterName: 'Wi-Fi', platform: 'win32', exec: async () => { timeouts += 1; return { code: 0, stdout: '', stderr: '' }; } });
-  assert.equal(timeouts, 1);
-  resetFirewallGuard();
+  assert.match(second.notes.join('\n'), /PULT_NO_FIREWALL|--no-firewall/);
 });
 
-test('an elevation failure still retries the firewall check', async () => {
-  resetFirewallGuard();
-  let calls = 0;
-  const exec = async (_file, args) => {
-    calls += 1;
-    if (args.includes('currentprofile')) return { code: 0, stdout: 'Private Profile Settings:\r\n', stderr: '' };
-    if (args.includes('add')) return { code: 1, stdout: '', stderr: 'The requested operation requires elevation.' };
-    return { code: 0, stdout: '', stderr: '' };
-  };
-  const first = await ensureWindowsFirewall({ ports: [4720], adapterName: 'Wi-Fi', platform: 'win32', exec });
-  assert.equal(first.applied, false);
-  assert.equal(first.skipped, false);
-  assert.match(first.notes.join('\n'), /администратора/);
-  const before = calls;
-  await ensureWindowsFirewall({ ports: [4720], adapterName: 'Wi-Fi', platform: 'win32', exec });
-  assert.ok(calls > before);
-  resetFirewallGuard();
-});
-
-test('--no-firewall and PULT_NO_FIREWALL skip netsh', async () => {
-  resetFirewallGuard();
-  let calls = 0;
-  const exec = async () => { calls += 1; return { code: 0, stdout: '', stderr: '' }; };
-  const fromEnv = await ensureWindowsFirewall({
-    ports: [4720],
-    platform: 'win32',
-    disabled: firewallDisabled(['node', 'index.js'], { PULT_NO_FIREWALL: '1' }),
-    exec,
-  });
-  assert.equal(fromEnv.skipped, true);
-  assert.match(fromEnv.notes.join('\n'), /4720/);
-  const fromFlag = await ensureWindowsFirewall({
-    ports: [4720],
-    platform: 'win32',
-    disabled: firewallDisabled(['node', 'index.js', '--no-firewall'], {}),
-    exec,
-  });
-  assert.equal(fromFlag.skipped, true);
-  assert.equal(calls, 0);
+test('--no-firewall and PULT_NO_FIREWALL are recognised', async () => {
+  assert.equal(firewallDisabled(['node', 'index.js'], { PULT_NO_FIREWALL: '1' }), true);
+  assert.equal(firewallDisabled(['node', 'index.js', '--no-firewall'], {}), true);
   assert.equal(firewallDisabled(['node', 'index.js'], {}), false);
 });
 
@@ -143,54 +73,29 @@ test('a blocked route lookup becomes an empty list', async () => {
   assert.deepEqual(routes, []);
 });
 
-test('blocked PowerShell fails one feature and leaves power and the app list up', async () => {
-  const execCalls = [];
-  const platform = createWindowsPlatform({
-    force: true,
-    spawnImpl() { throw eperm(); },
-    exec(file, args) {
-      execCalls.push([file, [...args]]);
-      return { code: 0, stdout: '', stderr: '', blocked: false };
-    },
-  });
+test('node on Windows refuses desktop control and does not start a helper', async () => {
+  const platform = createWindowsPlatform({ force: true });
   const status = await platform.getStatus();
   assert.equal(status.unavailable, true);
   assert.equal(status.volume, null);
-  assert.match(status.reason, /PowerShell/);
-  await assert.rejects(platform.captureFrame(), error => error.unavailable === true && /PowerShell/.test(error.message));
-  const apps = await platform.listApps();
-  assert.ok(Array.isArray(apps));
-  await platform.power('lock');
-  assert.deepEqual(execCalls, [['rundll32.exe', ['user32.dll,LockWorkStation']]]);
-  assert.equal(execCalls.some(([file]) => /powershell/i.test(file)), false);
+  assert.match(status.reason, /pult\.exe/);
+  await assert.rejects(platform.captureFrame(), error => error.unavailable === true && /pult\.exe/.test(error.message));
+  assert.deepEqual(await platform.listApps(), []);
+  await assert.rejects(platform.power('lock'), error => /pult\.exe/.test(error.message));
+  assert.deepEqual(await platform.pollNotifications(), []);
 });
 
-test('an async PowerShell error event stays inside the status call', async () => {
-  const platform = createWindowsPlatform({
-    force: true,
-    spawnImpl() {
-      const stdout = new PassThrough();
-      const stdin = new PassThrough();
-      const handlers = {};
-      const child = {
-        stdout,
-        stdin,
-        stderr: new PassThrough(),
-        killed: false,
-        kill() {},
-        on(event, fn) {
-          (handlers[event] ||= []).push(fn);
-          return child;
-        },
-      };
-      queueMicrotask(() => {
-        for (const fn of handlers.error || []) fn(eperm());
-      });
-      return child;
-    },
-    exec() { return { code: 0, stdout: '', stderr: '', blocked: false }; },
-  });
-  const status = await platform.getStatus();
-  assert.equal(status.unavailable, true);
-  assert.match(status.reason, /PowerShell/);
+test('the Windows launch path does not name a script host', async () => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const files = ['src/platform/windows.js', 'src/firewall.js', 'src/index.js', 'Start-Pult.cmd'];
+  const banned = [/powershell/i, /cmd\.exe/i, /rundll32/i, /wscript/i, /cscript/i, /mshta/i, /child_process/, /netsh/i];
+  for (const name of files) {
+    const text = await readFile(path.join(root, name), 'utf8');
+    for (const pattern of banned) {
+      assert.doesNotMatch(text, pattern, `${name} matches ${pattern}`);
+    }
+  }
+  const launcher = await readFile(path.join(root, 'Start-Pult.cmd'), 'utf8');
+  assert.doesNotMatch(launcher, /\bnode(\.exe)?\b/i);
+  await assert.rejects(readFile(path.join(root, 'src/platform/windows-helper.ps1')));
 });
