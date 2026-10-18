@@ -1,0 +1,17 @@
+{
+  "name": "pult-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Пульт: агент удалённого управления в локальной сети",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "web-push": "^3.6.7"
+  }
+}

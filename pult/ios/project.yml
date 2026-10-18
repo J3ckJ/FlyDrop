@@ -1,0 +1,55 @@
+name: Pult
+options:
+  bundleIdPrefix: app.flydrop
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  SWIFT_VERSION: "5.0"
+  MARKETING_VERSION: "0.1.0"
+  CURRENT_PROJECT_VERSION: "1"
+packages:
+  PultProtocol:
+    path: ../protocol
+targets:
+  Pult:
+    type: application
+    platform: iOS
+    sources:
+      - path: Pult
+      - path: Shared
+    dependencies:
+      - package: PultProtocol
+      - target: PultWidgets
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.flydrop.pult
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Pult/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Pult/Pult.entitlements
+        TARGETED_DEVICE_FAMILY: "1"
+        SUPPORTS_MACCATALYST: NO
+  PultWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: PultWidgets
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.flydrop.pult.widgets
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: PultWidgets/Info.plist
+        CODE_SIGN_ENTITLEMENTS: PultWidgets/PultWidgets.entitlements
+        APPLICATION_EXTENSION_API_ONLY: YES
+schemes:
+  Pult:
+    build:
+      targets:
+        Pult: all
+        PultWidgets: all
+    run:
+      config: Debug
+      commandLineArguments:
+        "-PultMock": true
