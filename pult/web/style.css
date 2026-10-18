@@ -138,6 +138,7 @@ button { background: none; border: 0; padding: 0; }
 .hold { margin-top: 12px; height: 64px; border-radius: 18px; background: #2a1214; color: var(--red); font-weight: 750; position: relative; overflow: hidden; }
 .hold i { position: absolute; inset: 0 auto 0 0; width: 0; background: rgba(255,69,58,.35); }
 .warn { color: var(--amber); font-size: 14px; }
+.warn.banner { margin: 0 16px 8px; }
 .list { padding: 8px 16px 24px; display: flex; flex-direction: column; gap: 10px; }
 .row { border-radius: 18px; padding: 12px; background: #161618; }
 .row h3 { margin: 0 0 4px; font-size: 16px; }

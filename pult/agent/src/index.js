@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import QRCode from 'qrcode';
 import { createAgent } from './agent.js';
-import { ensureWindowsFirewall } from './firewall.js';
+import { ensureWindowsFirewall, firewallCommand, firewallDisabled } from './firewall.js';
 import { openStore } from './store.js';
 
 function flag(name) {
@@ -68,10 +68,23 @@ if (agent.mac) console.log(`  MAC для Wake-on-LAN: ${agent.mac}`);
 if (fly?.external) console.log(`  FlyDrop уже запущен: https://…:${fly.httpsPort} — подтвердите телефон в его окне`);
 else if (fly) console.log(`  FlyDrop внутри Пульта: HTTPS ${fly.httpsPort}, файлы до 1 ГБ`);
 else console.log('  FlyDrop выключен');
-const firewall = await ensureWindowsFirewall({
-  ports: [agent.port, fly?.httpsPort].filter(Boolean),
-  adapterName: primary?.name,
-});
+const firewallPorts = [agent.port, fly?.httpsPort].filter(Boolean);
+let firewall = { notes: [] };
+try {
+  firewall = await ensureWindowsFirewall({
+    ports: firewallPorts,
+    adapterName: primary?.name,
+    disabled: firewallDisabled(),
+  });
+} catch (error) {
+  const command = firewallCommand(firewallPorts);
+  firewall = {
+    notes: [
+      `Проверка брандмауэра не запустилась (${error.code || error.message}). Агент продолжает работу.`,
+      command ? `Если iPhone не открывается, выполните от администратора: ${command}` : '',
+    ].filter(Boolean),
+  };
+}
 for (const note of firewall.notes) console.log(`  ${note}`);
 console.log('');
 console.log('  Телефон вводит этот код. Без кода управление недоступно.');

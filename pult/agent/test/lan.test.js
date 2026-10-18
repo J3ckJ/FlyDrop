@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import QRCode from 'qrcode';
 import { describeAdapters, parseDarwinRoute, parseLinuxProcRoute, parseWindowsRoutePrint } from '../src/lan.js';
-import { ensureWindowsFirewall, firewallAllowsPort, planFirewall } from '../src/firewall.js';
+import { ensureWindowsFirewall, firewallAllowsPort, planFirewall, resetFirewallGuard } from '../src/firewall.js';
 
 const owner = {
   'vEthernet (WSL)': [{ family: 'IPv4', internal: false, address: '172.19.224.1', mac: '00:15:5d:00:00:01' }],
@@ -66,6 +66,7 @@ test('public Wi-Fi does not get a firewall hole, private Wi-Fi does', async () =
   assert.match(publicPlan.command, /profile=private/);
   assert.match(publicPlan.command, /4720,4318/);
 
+  resetFirewallGuard();
   const calls = [];
   const result = await ensureWindowsFirewall({
     ports: [4720, 4318],
@@ -73,12 +74,14 @@ test('public Wi-Fi does not get a firewall hole, private Wi-Fi does', async () =
     platform: 'win32',
     exec: async (file, args) => {
       calls.push([file, args.join(' ')]);
-      if (file === 'powershell.exe') return { code: 0, stdout: JSON.stringify({ InterfaceAlias: 'Wi-Fi', NetworkCategory: 1 }), stderr: '' };
+      if (args.includes('currentprofile')) return { code: 0, stdout: 'Private Profile Settings:\r\nState                                 ON\r\n', stderr: '' };
       if (args.includes('add')) return { code: 0, stdout: 'Ok.', stderr: '' };
       return { code: 0, stdout: '', stderr: '' };
     },
   });
   assert.equal(result.applied, true);
+  assert.equal(calls.some(call => call[0] === 'powershell.exe'), false);
+  assert.equal(calls[0][0], 'netsh');
   assert.ok(calls.some(call => call[1].includes('localport=4720,4318') && call[1].includes('profile=private')));
   assert.equal(firewallAllowsPort('Rule Name: Pult\r\nEnabled: Yes\r\nProfiles: Private\r\nAction: Allow\r\nLocalPort: 4720\r\n', 4720), true);
   assert.equal(firewallAllowsPort(rules[4720], 4720), false);

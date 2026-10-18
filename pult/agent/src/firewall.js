@@ -1,6 +1,17 @@
-import { execFile } from 'node:child_process';
+import { safeExecFile } from './platform/spawn.js';
 
 const RULE = 'Pult';
+let skipReason = '';
+
+export function resetFirewallGuard() {
+  skipReason = '';
+}
+
+export function firewallDisabled(argv = process.argv, env = process.env) {
+  if (argv.includes('--no-firewall')) return true;
+  const value = env.PULT_NO_FIREWALL;
+  return value === '1' || value === 'true';
+}
 
 export function parseConnectionProfiles(text) {
   const trimmed = String(text || '').trim();
@@ -12,6 +23,15 @@ export function parseConnectionProfiles(text) {
     name: String(item.InterfaceAlias || item.Name || ''),
     category: item.NetworkCategory,
   }));
+}
+
+export function netshProfileKinds(text) {
+  const raw = String(text || '');
+  const kinds = [];
+  if (/Public Profile Settings/i.test(raw)) kinds.push('public');
+  if (/Private Profile Settings/i.test(raw)) kinds.push('private');
+  if (/Domain Profile Settings/i.test(raw)) kinds.push('domain');
+  return kinds;
 }
 
 export function profileKind(category) {
@@ -66,29 +86,63 @@ export function planFirewall({ ports, adapterName, profiles, rules }) {
   return { kind, missing, command, apply: true, notes };
 }
 
-export async function ensureWindowsFirewall({ ports, adapterName, platform = process.platform, exec = defaultExec } = {}) {
-  if (platform !== 'win32') return { applied: false, notes: [] };
+export async function ensureWindowsFirewall({ ports, adapterName, platform = process.platform, exec = defaultExec, disabled = false } = {}) {
+  if (platform !== 'win32') return { applied: false, notes: [], skipped: false };
   const list = normalizePorts(ports);
-  const profileRun = await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-NetConnectionProfile | Select-Object InterfaceAlias,NetworkCategory | ConvertTo-Json -Compress']);
-  const rules = {};
-  for (const port of list) {
-    const shown = await exec('netsh', ['advfirewall', 'firewall', 'show', 'rule', 'name=all', 'dir=in', 'protocol=tcp', `localport=${port}`]);
-    rules[port] = shown.stdout || '';
+  const command = firewallCommand(list);
+  if (disabled) {
+    const note = command
+      ? `Проверка брандмауэра выключена (--no-firewall / PULT_NO_FIREWALL). Если iPhone не открывается: ${command}`
+      : 'Проверка брандмауэра выключена (--no-firewall / PULT_NO_FIREWALL).';
+    return { applied: false, skipped: true, command, notes: [note] };
   }
-  const plan = planFirewall({
-    ports: list,
-    adapterName,
-    profiles: parseConnectionProfiles(profileRun.stdout || ''),
-    rules,
-  });
-  let applied = false;
-  if (plan.apply && plan.command) {
-    const added = await exec('netsh', ['advfirewall', 'firewall', 'add', 'rule', `name=${RULE}`, 'dir=in', 'action=allow', 'protocol=TCP', `localport=${plan.missing.join(',')}`, 'profile=private']);
-    applied = added.code === 0;
-    if (applied) plan.notes.push('Правило брандмауэра для частной сети добавлено.');
-    else plan.notes.push('Добавить правило не удалось: запустите команду выше от администратора.');
+  if (skipReason) return { applied: false, skipped: true, blocked: true, command, notes: skipReason.split('\n') };
+  try {
+    const profileRun = await exec('netsh', ['advfirewall', 'show', 'currentprofile']);
+    if (profileRun?.blocked) return lockSkip(list, blockedNotes(list, profileRun));
+    const kinds = netshProfileKinds(profileRun?.stdout || '');
+    if (kinds.includes('public') && (kinds.includes('private') || kinds.includes('domain'))) {
+      const notes = [
+        'Сейчас активны и частный, и общедоступный профили. Правило Пульт не добавляет, чтобы не открыть общедоступную сеть.',
+      ];
+      if (command) notes.push(`Если сеть iPhone частная, выполните от администратора: ${command}`);
+      return { applied: false, skipped: false, command, notes };
+    }
+    const rules = {};
+    for (const port of list) {
+      const shown = await exec('netsh', ['advfirewall', 'firewall', 'show', 'rule', 'name=all', 'dir=in', 'protocol=tcp', `localport=${port}`]);
+      if (shown?.blocked) return lockSkip(list, blockedNotes(list, shown));
+      rules[port] = shown?.stdout || '';
+    }
+    const category = kinds.includes('public') ? 'public' : kinds.includes('domain') ? 'domain' : kinds.includes('private') ? 'private' : '';
+    const profiles = category ? [{ name: adapterName || '', category }] : [];
+    const plan = planFirewall({ ports: list, adapterName, profiles, rules });
+    let applied = false;
+    if (plan.apply && plan.command) {
+      const added = await exec('netsh', ['advfirewall', 'firewall', 'add', 'rule', `name=${RULE}`, 'dir=in', 'action=allow', 'protocol=TCP', `localport=${plan.missing.join(',')}`, 'profile=private']);
+      if (added?.blocked) return lockSkip(list, blockedNotes(list, added));
+      applied = added?.code === 0;
+      if (applied) plan.notes.push('Правило брандмауэра для частной сети добавлено.');
+      else plan.notes.push('Добавить правило не удалось: запустите команду выше от администратора.');
+    }
+    return { applied, notes: plan.notes, command: plan.command, skipped: false };
+  } catch (error) {
+    return lockSkip(list, blockedNotes(list, error));
   }
-  return { applied, notes: plan.notes, command: plan.command };
+}
+
+function lockSkip(ports, notes) {
+  skipReason = notes.join('\n');
+  return { applied: false, skipped: true, blocked: true, command: firewallCommand(ports), notes };
+}
+
+function blockedNotes(ports, error) {
+  const command = firewallCommand(ports);
+  const why = error?.killed ? 'таймаут' : (error?.code || 'ошибка запуска');
+  const notes = [`Проверка брандмауэра не запустилась (${why}). Агент продолжает работу.`];
+  if (command) notes.push(`Если iPhone не открывается, выполните от администратора: ${command}`);
+  notes.push('Повтор в этом запуске пропущен. Отключить проверку: --no-firewall или PULT_NO_FIREWALL=1.');
+  return notes;
 }
 
 function normalizePorts(ports) {
@@ -96,9 +150,5 @@ function normalizePorts(ports) {
 }
 
 function defaultExec(file, args) {
-  return new Promise(resolve => {
-    execFile(file, args, { windowsHide: true, timeout: 20000 }, (error, stdout, stderr) => {
-      resolve({ code: error ? error.code || 1 : 0, stdout: String(stdout || ''), stderr: String(stderr || '') });
-    });
-  });
+  return safeExecFile(file, args, { timeout: 20000 });
 }

@@ -22,8 +22,25 @@ export function createMacosPlatform() {
   let child;
   let seq = 0;
   const pending = new Map();
+  const failAll = (error) => {
+    for (const waiter of pending.values()) {
+      clearTimeout(waiter.timer);
+      waiter.reject(error);
+    }
+    pending.clear();
+    child = undefined;
+  };
   const start = () => {
-    child = spawn('/usr/bin/python3', [helperPath], { stdio: ['pipe', 'pipe', 'pipe'] });
+    try {
+      child = spawn('/usr/bin/python3', [helperPath], { stdio: ['pipe', 'pipe', 'pipe'] });
+    } catch (error) {
+      child = undefined;
+      throw Object.assign(error, { unavailable: error.code === 'EPERM' || error.code === 'EACCES' });
+    }
+    child.stdin.on('error', () => {});
+    child.on('error', error => {
+      failAll(Object.assign(new Error('Помощник macOS не запустился'), { code: error.code || 'spawn', unavailable: error.code === 'EPERM' || error.code === 'EACCES' }));
+    });
     const lines = createInterface({ input: child.stdout });
     lines.on('line', line => {
       let message;
@@ -35,30 +52,57 @@ export function createMacosPlatform() {
       if (message.ok) waiter.resolve(message);
       else waiter.reject(new Error(message.error || 'Ошибка macOS'));
     });
-    child.on('exit', () => { child = undefined; });
+    child.on('exit', () => {
+      lines.close();
+      failAll(Object.assign(new Error('Помощник macOS остановился'), { code: 'exit' }));
+    });
   };
   const call = (op, extra = {}) => new Promise((resolve, reject) => {
-    if (!child) start();
+    try { if (!child || child.killed) start(); }
+    catch (error) { reject(error); return; }
     const id = ++seq;
     const timer = setTimeout(() => { pending.delete(id); reject(new Error('macOS не ответил')); }, 5000);
     pending.set(id, { resolve, reject, timer });
-    child.stdin.write(`${JSON.stringify({ id, op, ...extra })}\n`);
+    try { child.stdin.write(`${JSON.stringify({ id, op, ...extra })}\n`); }
+    catch (error) {
+      pending.delete(id);
+      clearTimeout(timer);
+      reject(error);
+    }
   });
   const sh = async (command, args) => (await run(command, args)).stdout.toString('utf8').trim();
   return {
     kind: 'macos',
     available: true,
     async getStatus() {
-      const volume = Number(await sh('osascript', ['-e', 'output volume of (get volume settings)'])) || 0;
-      const muted = (await sh('osascript', ['-e', 'output muted of (get volume settings)'])) === 'true';
-      let media = null;
       try {
-        const title = await sh('osascript', ['-e', 'tell application "Spotify" to name of current track']);
-        const artist = await sh('osascript', ['-e', 'tell application "Spotify" to artist of current track']);
-        const playing = (await sh('osascript', ['-e', 'tell application "Spotify" to player state as string'])) === 'playing';
-        media = { title, artist, app: 'Spotify', playing, position: 0, duration: 0 };
-      } catch { media = null; }
-      return { battery: null, volume, muted, asleep: false, locked: false, media, appsRunning: [] };
+        const volume = Number(await sh('osascript', ['-e', 'output volume of (get volume settings)'])) || 0;
+        const muted = (await sh('osascript', ['-e', 'output muted of (get volume settings)'])) === 'true';
+        let media = null;
+        try {
+          const title = await sh('osascript', ['-e', 'tell application "Spotify" to name of current track']);
+          const artist = await sh('osascript', ['-e', 'tell application "Spotify" to artist of current track']);
+          const playing = (await sh('osascript', ['-e', 'tell application "Spotify" to player state as string'])) === 'playing';
+          media = { title, artist, app: 'Spotify', playing, position: 0, duration: 0 };
+        } catch (error) {
+          if (error.unavailable || error.code === 'EPERM' || error.code === 'EACCES') throw error;
+          media = null;
+        }
+        return { battery: null, volume, muted, asleep: false, locked: false, media, appsRunning: [] };
+      } catch (error) {
+        if (!error.unavailable && error.code !== 'EPERM' && error.code !== 'EACCES') throw error;
+        return {
+          unavailable: true,
+          reason: 'Команды macOS не запустились. Экран и управление недоступны, агент продолжает работу.',
+          battery: null,
+          volume: null,
+          muted: false,
+          asleep: false,
+          locked: false,
+          media: null,
+          appsRunning: [],
+        };
+      }
     },
     async captureFrame() {
       const file = `/tmp/pult-frame-${process.pid}.jpg`;

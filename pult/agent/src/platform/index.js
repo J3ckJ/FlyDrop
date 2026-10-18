@@ -16,7 +16,7 @@ export function createPlatform(kind = 'auto', options = {}) {
   const name = kind === 'auto' ? detectPlatform() : kind;
   switch (name) {
     case 'mock': return createMockPlatform(options);
-    case 'windows': return createWindowsPlatform();
+    case 'windows': return createWindowsPlatform(options);
     case 'macos': return createMacosPlatform();
     case 'linux': return createLinuxPlatform();
     default: {

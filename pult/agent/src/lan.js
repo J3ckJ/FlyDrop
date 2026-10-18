@@ -1,7 +1,7 @@
-import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import { isPrivateIPv4, plainIP } from './net.js';
+import { safeExecFile } from './platform/spawn.js';
 
 const VIRTUAL = /virtual|vethernet|hyper-?v|wsl|docker|virtualbox|vbox|vmware|vmnet|loopback|tap|tun|tunnel|vpn|tailscale|wireguard|hamachi|npcap|bluetooth|zerotier|nordlynx|cisco|anyconnect|fortinet|ppp|isatap|teredo|host-only|sangfor/i;
 const WIFI = /wi-?fi|wlan|wireless|беспровод/i;
@@ -107,17 +107,20 @@ export function describeAdapters(interfaceMap, routes = []) {
   return { phone: ordered, skipped, gateway: routed.length > 0, foreignGateway: routes.length > 0 && routed.length === 0 };
 }
 
-export async function readDefaultRoutes() {
-  if (process.platform === 'win32') {
-    const { stdout } = await run('route', ['print', '-4']);
-    return parseWindowsRoutePrint(stdout);
-  }
-  if (process.platform === 'darwin') {
-    const { stdout } = await run('route', ['-n', 'get', 'default']);
-    return parseDarwinRoute(stdout);
-  }
+export async function readDefaultRoutes(options = {}) {
+  const platform = options.platform || process.platform;
+  const exec = options.exec || run;
   try {
-    return parseLinuxProcRoute(await readFile('/proc/net/route', 'utf8'));
+    if (platform === 'win32') {
+      const { stdout } = await exec('route', ['print', '-4']);
+      return parseWindowsRoutePrint(stdout);
+    }
+    if (platform === 'darwin') {
+      const { stdout } = await exec('route', ['-n', 'get', 'default']);
+      return parseDarwinRoute(stdout);
+    }
+    const text = options.routeText != null ? options.routeText : await readFile('/proc/net/route', 'utf8');
+    return parseLinuxProcRoute(text);
   } catch {
     return [];
   }
@@ -127,10 +130,7 @@ export async function currentLan() {
   return describeAdapters(os.networkInterfaces(), await readDefaultRoutes());
 }
 
-function run(file, args) {
-  return new Promise(resolve => {
-    execFile(file, args, { windowsHide: true, timeout: 8000 }, (error, stdout, stderr) => {
-      resolve({ code: error ? error.code || 1 : 0, stdout: String(stdout || ''), stderr: String(stderr || '') });
-    });
-  });
+async function run(file, args) {
+  const result = await safeExecFile(file, args, { timeout: 8000 });
+  return { code: result.blocked ? 1 : result.code, stdout: result.blocked ? '' : result.stdout, stderr: result.stderr };
 }

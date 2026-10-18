@@ -3,7 +3,10 @@ import { commandExists, run } from './spawn.js';
 
 async function optional(command, args, fallback = '') {
   try { return (await run(command, args)).stdout.toString('utf8').trim(); }
-  catch { return fallback; }
+  catch (error) {
+    if (error.code === 'EPERM' || error.code === 'EACCES' || error.unavailable) throw Object.assign(error, { unavailable: true });
+    return fallback;
+  }
 }
 
 export function createLinuxPlatform() {
@@ -11,18 +14,33 @@ export function createLinuxPlatform() {
     kind: 'linux',
     available: process.platform === 'linux',
     async getStatus() {
-      const volumeText = await optional('pactl', ['get-sink-volume', '@DEFAULT_SINK@']);
-      const match = volumeText.match(/(\d+)%/);
-      const mute = await optional('pactl', ['get-sink-mute', '@DEFAULT_SINK@']);
-      return {
-        battery: null,
-        volume: match ? Number(match[1]) : 0,
-        muted: mute.includes('yes'),
-        asleep: false,
-        locked: false,
-        media: null,
-        appsRunning: [],
-      };
+      try {
+        const volumeText = await optional('pactl', ['get-sink-volume', '@DEFAULT_SINK@']);
+        const match = volumeText.match(/(\d+)%/);
+        const mute = await optional('pactl', ['get-sink-mute', '@DEFAULT_SINK@']);
+        return {
+          battery: null,
+          volume: match ? Number(match[1]) : 0,
+          muted: mute.includes('yes'),
+          asleep: false,
+          locked: false,
+          media: null,
+          appsRunning: [],
+        };
+      } catch (error) {
+        if (!error.unavailable && error.code !== 'EPERM' && error.code !== 'EACCES') throw error;
+        return {
+          unavailable: true,
+          reason: 'Запуск команды запрещён политикой. Громкость на этом компьютере недоступна, агент продолжает работу.',
+          battery: null,
+          volume: null,
+          muted: false,
+          asleep: false,
+          locked: false,
+          media: null,
+          appsRunning: [],
+        };
+      }
     },
     async captureFrame() {
       if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) throw Object.assign(new Error('Нет графического сеанса'), { code: 'display' });

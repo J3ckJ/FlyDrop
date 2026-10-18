@@ -242,7 +242,11 @@ export async function createAgent(options = {}) {
         session.seq = (session.seq || 0) + 1;
         session.socket.sendBinary(encodeFrame(frame.jpeg, { seq: session.seq, width: frame.width, height: frame.height }));
       } catch (error) {
-        session.socket.send(eventMessage('event.screen', { error: error.message }));
+        session.socket.send(eventMessage('event.screen', { error: error.message, unavailable: Boolean(error.unavailable) }));
+        if (error.unavailable) {
+          stopScreen(session);
+          return;
+        }
       }
       if (!session.streaming) return;
       const wait = Math.max(0, interval - (Date.now() - started));

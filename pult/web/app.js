@@ -68,6 +68,7 @@ function applyStatus(payload) {
   computer.battery = payload.battery;
   computer.asleep = payload.asleep;
   computer.online = !payload.asleep;
+  computer.unavailable = payload.unavailable ? (payload.reason || computer.unavailable || 'Управление недоступно') : '';
   if (payload.flydrop?.active) upsertTransfer(payload.flydrop);
 }
 
@@ -244,8 +245,11 @@ function shell(body) {
       <button class="${state.tab === 'inbox' ? 'on' : ''}" data-tab="inbox">${icon('inbox')}Входящие ${state.notes.length ? `<span class="badge">${state.notes.length}</span>` : ''}</button>
       <button class="${state.tab === 'scenarios' ? 'on' : ''}" data-tab="scenarios">${icon('bolt')}Сценарии</button>
     </nav>` : '';
+  const blocked = state.computers.find(item => item.unavailable);
+  const banner = blocked ? `<p class="warn banner">${esc(blocked.unavailable)}</p>` : '';
   return `<div class="status"><span>9:41</span><span></span></div>${island}
     ${state.screen === 'home' ? `<label class="search glass">${icon('search')}<input id="search" placeholder="Поиск или команда" value="${esc(state.search)}">${icon('mic')}</label>` : ''}
+    ${banner}
     <div class="screen">${body}</div>${sheet()}${tabs}`;
 }
 
@@ -282,7 +286,12 @@ async function send(type, payload) {
   if (computer && computer.id !== 'self' && ['input.move', 'input.click', 'input.key', 'input.text', 'volume.set', 'power.action', 'apps.launch', 'media.command'].includes(type)) {
     return demoLocal(type, payload, computer);
   }
-  return session.request(type, payload);
+  const result = await session.request(type, payload);
+  if (!result.ok && type !== 'input.move' && type !== 'flydrop.progress' && result.error) {
+    const live = computerById('self');
+    if (live) live.unavailable = result.error;
+  }
+  return result;
 }
 
 function demoLocal(type, payload, computer) {
@@ -338,12 +347,15 @@ function enter(info) {
 
 async function refresh() {
   const status = await session.request('status.get');
-  if (status.ok) applyStatus(status.payload);
-  const apps = await session.request('apps.list');
   const self = computerById('self');
+  if (status.ok) applyStatus(status.payload);
+  else if (self && status.error) self.unavailable = status.error;
+  const apps = await session.request('apps.list');
   if (apps.ok && self) self.apps = apps.payload.apps || [];
+  else if (self && !self.unavailable && apps.error) self.unavailable = apps.error;
   const clip = await session.request('clipboard.get');
   if (clip.ok && clip.payload.text) state.clipboard = { from: state.info?.name || 'Компьютер', age: 'сейчас', text: clip.payload.text };
+  else if (self && !self.unavailable && clip.error) self.unavailable = clip.error;
   render();
   if (shot === 'drop') root.querySelector('[data-id="self"]')?.scrollIntoView({ inline: 'center', block: 'nearest' });
   await syncOutside();
@@ -602,6 +614,10 @@ async function main() {
       if (message.type === 'event.clipboard') state.clipboard = { from: state.info?.name || 'Компьютер', age: 'сейчас', text: message.payload.text };
       if (message.type === 'event.flydrop') upsertTransfer(message.payload);
       if (message.type === 'event.media' || message.type === 'status.get') applyStatus(message.payload);
+      if (message.type === 'event.screen' && message.payload?.error) {
+        const live = computerById('self');
+        if (live) live.unavailable = message.payload.error;
+      }
       render();
       void syncOutside();
     });
