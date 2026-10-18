@@ -137,22 +137,22 @@ final class AppModel {
         computers = [
             Computer(id: "macbook", name: "MacBook Pro", osName: "macos", online: true, asleep: false, battery: 82, subtitle: "Spotify, Xcode · батарея 82 %\nWi-Fi «Home» · 192.168.1.24", volume: 40, media: MediaItem(title: "Teardrop", artist: "Massive Attack", app: "Spotify", playing: true, position: 134, duration: 330), apps: [
                 AppItem(id: "Spotify", name: "Spotify", running: true),
-                AppItem(id: "Safari", name: "Safari", running: false),
+                AppItem(id: "Safari", name: "Safari", running: true),
                 AppItem(id: "Terminal", name: "Терминал", running: false),
-                AppItem(id: "Xcode", name: "Xcode", running: true),
+                AppItem(id: "Xcode", name: "Xcode", running: false),
             ], mac: nil, flydropSoon: true, live: false, backup: nil, host: nil, port: nil, fingerprint: nil, flydropCode: nil, flydropHostId: nil, flydropPort: nil),
             Computer(id: "win", name: "Windows ПК", osName: "windows", online: true, asleep: false, battery: nil, subtitle: "в сети · desktop-eugene", volume: 40, media: nil, apps: [], mac: nil, flydropSoon: false, live: true, backup: nil, host: nil, port: nil, fingerprint: nil, flydropCode: nil, flydropHostId: nil, flydropPort: nil),
             Computer(id: "mini", name: "mac-mini", osName: "macos", online: false, asleep: true, subtitle: "спит 3 ч", volume: 0, media: nil, apps: [], mac: "B8:27:EB:00:00:01", flydropSoon: true, live: false, backup: "03:00", host: nil, port: nil, fingerprint: nil, flydropCode: nil, flydropHostId: nil, flydropPort: nil),
         ]
         tasks = [
             PultTask(id: "music", computerId: "macbook", kind: "media", title: "Teardrop", detail: "Massive Attack · Spotify · 2:14", percent: nil),
-            PultTask(id: "fly", computerId: "win", kind: "flydrop", title: "IMG_2041.jpg", detail: "FlyDrop → Windows ПК", percent: 64),
+            PultTask(id: "fly", computerId: "win", kind: "flydrop", title: "FlyDrop · IMG_2041.jpg", detail: "2,0 из 3,1 МБ · ≈ 2 с", percent: 64),
         ]
         clipboard = ClipboardItem(from: "MacBook Pro", age: "10 с назад", text: "ssh://git@mac-mini.local:2222/eugene/el-workspace.git")
         notes = [
-            PultNote(id: "n1", title: "FlyDrop: фото получено", body: "Windows ПК · сейчас", ok: true),
-            PultNote(id: "n2", title: "Xcode: сборка успешна", body: "MacBook Pro · 2 мин", ok: true),
-            PultNote(id: "n3", title: "Windows: нужна перезагрузка", body: "Windows ПК · 14 мин", ok: false),
+            PultNote(id: "n1", title: "FlyDrop: фото получено", body: "Windows ПК · хранится ещё 59 мин", ok: true),
+            PultNote(id: "n2", title: "Xcode: сборка успешна", body: "MacBook Pro · EL Workspace · 48 с", ok: true),
+            PultNote(id: "n3", title: "Windows: нужна перезагрузка", body: "Windows ПК · сделать ночью?", ok: false),
         ]
         phase = .app
         if activity == nil { activity = ActivityHandle() }

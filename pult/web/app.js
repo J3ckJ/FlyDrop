@@ -4,6 +4,17 @@ import { zipFiles } from './zip.js';
 
 const root = document.querySelector('#app');
 const shot = new URLSearchParams(location.search).get('shot');
+const SHOTS = {
+  '01': 'home', home: 'home',
+  '02': 'control', control: 'control',
+  '03': 'trackpad', trackpad: 'trackpad',
+  '04': 'drop', drop: 'drop',
+  '05': 'now', now: 'now',
+  '06': 'media', media: 'media',
+  '07': 'inbox', inbox: 'inbox',
+  '08': 'power', power: 'power',
+  '09': 'lock', lock: 'lock',
+};
 const state = {
   phase: 'boot',
   error: '',
@@ -36,22 +47,27 @@ function computerById(id) { return state.computers.find(item => item.id === id);
 function current() { return state.computers[state.index] || state.computers[0]; }
 
 function seedDemo(info) {
+  state.demo = true;
   state.computers = [
-    { id: 'macbook', name: 'MacBook Pro', os: 'macos', online: true, battery: 82, subtitle: 'Spotify, Xcode · батарея 82 %\nWi-Fi «Home» · 192.168.1.24', flydropSoon: true, volume: 40, media: { title: 'Teardrop', artist: 'Massive Attack', app: 'Spotify', playing: true, position: 134, duration: 330 }, apps: [
-      { id: 'Spotify', name: 'Spotify', running: true }, { id: 'Safari', name: 'Safari', running: false }, { id: 'Terminal', name: 'Терминал', running: false }, { id: 'Xcode', name: 'Xcode', running: true },
+    { id: 'macbook', name: 'MacBook Pro', os: 'macos', online: true, battery: 82, host: '192.168.1.24', subtitle: 'Spotify, Xcode · батарея 82 %\nWi-Fi «Home» · 192.168.1.24', flydropSoon: true, volume: 40, media: { title: 'Teardrop', artist: 'Massive Attack', app: 'Spotify', playing: true, position: 134, duration: 330 }, apps: [
+      { id: 'Spotify', name: 'Spotify', running: true, glyph: 'note' },
+      { id: 'Safari', name: 'Safari', running: true, glyph: 'search' },
+      { id: 'Terminal', name: 'Терминал', running: false, glyph: 'term' },
+      { id: 'Xcode', name: 'Xcode', running: false, glyph: 'screen' },
+      { id: 'more', name: 'Ещё', running: false, glyph: 'plus' },
     ] },
-    { id: 'self', name: info.name || 'Windows ПК', os: 'windows', online: true, live: true, subtitle: 'в сети · desktop-eugene', volume: 40, media: null, apps: [] },
-    { id: 'mini', name: 'mac-mini', os: 'macos', online: false, asleep: true, subtitle: 'спит 3 ч', mac: 'B8:27:EB:00:00:01', backup: '03:00' },
+    { id: 'self', name: info.name || 'Windows ПК', os: 'windows', online: true, live: true, host: 'desktop-eugene', subtitle: 'в сети · desktop-eugene', volume: 40, media: null, apps: [] },
+    { id: 'mini', name: 'mac-mini', os: 'macos', online: false, asleep: true, host: 'mac-mini', subtitle: 'спит 3 ч', mac: 'B8:27:EB:00:00:01', backup: '03:00' },
   ];
   state.tasks = [
     { id: 'music', computerId: 'macbook', kind: 'media', title: 'Teardrop', detail: 'Massive Attack · Spotify · 2:14' },
-    { id: 'fly', computerId: 'self', kind: 'flydrop', title: 'IMG_2041.jpg', detail: 'FlyDrop → Windows ПК', percent: 64, loaded: 33, total: 51 },
+    { id: 'fly', computerId: 'self', kind: 'flydrop', title: 'FlyDrop · IMG_2041.jpg', detail: '2,0 из 3,1 МБ · ≈ 2 с', percent: 64, loaded: 2, total: 3.1 },
   ];
   state.clipboard = { from: 'MacBook Pro', age: '10 с назад', text: 'ssh://git@mac-mini.local:2222/eugene/el-workspace.git' };
   state.notes = [
-    { id: 'n1', title: 'FlyDrop: фото получено', body: 'Windows ПК · сейчас', ok: true },
-    { id: 'n2', title: 'Xcode: сборка успешна', body: 'MacBook Pro · 2 мин', ok: true },
-    { id: 'n3', title: 'Windows: нужна перезагрузка', body: 'Windows ПК · 14 мин', ok: false },
+    { id: 'n1', title: 'FlyDrop: фото получено', body: 'Windows ПК · хранится ещё 59 мин', time: 'сейчас', tone: 'blue' },
+    { id: 'n2', title: 'Xcode: сборка успешна', body: 'MacBook Pro · EL Workspace · 48 с', time: '2 мин', tone: 'green' },
+    { id: 'n3', title: 'Windows: нужна перезагрузка', body: 'Windows ПК · сделать ночью?', time: '1 ч', tone: 'muted' },
   ];
   state.recent = [{ id: 'recent-1', file: new File([new Uint8Array(48 * 1024)], 'IMG_2041.jpg', { type: 'image/jpeg' }) }];
 }
@@ -92,170 +108,312 @@ function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 }
 
-function icon(name) {
-  const paths = {
-    search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/>',
-    mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
-    display: '<rect x="4" y="3" width="16" height="18" rx="3"/><path d="M4 15h16M12 15v6"/>',
-    keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6 10h1M10 10h1M14 10h1M7 14h10"/>',
-    volume: '<path d="M4 9h4l5-4v14l-5-4H4z"/>',
-    apps: '<circle cx="7" cy="7" r="2.2"/><circle cx="17" cy="7" r="2.2"/><circle cx="7" cy="17" r="2.2"/><circle cx="17" cy="17" r="2.2"/>',
-    power: '<path d="M12 3v8M6.3 6.3a8 8 0 1 0 11.4 0"/>',
-    inbox: '<path d="M4 13l2.5-8h11l2.5 8v6H4z"/>',
-    bolt: '<path d="M13 3L5 13h6l-1 8 8-10h-6z"/>',
-  };
-  return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">${paths[name] || ''}</svg>`;
+const ICONS = {
+  power: '<path d="M12 3v8M6.3 6.3a8 8 0 1 0 11.4 0"/>',
+  kbd: '<rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6 10h1M9.5 10h1M13 10h1M16.5 10h1M7 14h10"/>',
+  pad: '<rect x="4" y="3" width="16" height="18" rx="3"/><path d="M4 15h16M12 15v6"/>',
+  play: '<path d="M7 5l12 7-12 7z" fill="currentColor"/>',
+  pause: '<path d="M8 5v14M16 5v14"/>',
+  vol: '<path d="M4 9h4l5-4v14l-5-4H4zM16.5 8.5a5 5 0 0 1 0 7M19 6a8.500 8.500 0 0 1 0 12"/>',
+  screen: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+  send: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+  clip: '<rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V3h6v1"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/>',
+  chev: '<path d="M9 6l6 6-6 6"/>',
+  back: '<path d="M15 6l-6 6 6 6"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  wake: '<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="3.5"/>',
+  next: '<path d="M6 6l9 6-9 6zM18 6v12"/>',
+  prev: '<path d="M18 6l-9 6 9 6zM6 6v12"/>',
+  apps: '<circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="7" r="2.5"/><circle cx="7" cy="17" r="2.5"/><circle cx="17" cy="17" r="2.5"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  bolt: '<path d="M13 3L5 13h6l-1 8 8-10h-6z"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+  mac: '<rect x="4" y="5" width="16" height="10.500" rx="1.500"/><path d="M2 18h20"/>',
+  pc: '<rect x="3" y="4" width="13" height="10" rx="1.500"/><path d="M7 18h5M9.500 14v4M19 5v14"/>',
+  mini: '<rect x="3.500" y="9" width="17" height="6" rx="2"/><path d="M7 12h1"/>',
+  note: '<path d="M9 18V6l11-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/>',
+  restart: '<path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4"/>',
+  tray: '<path d="M4 13l2.5-8h11l2.5 8v6H4zM4 13h5l1 2h4l1-2h5"/>',
+};
+
+function ic(name, size = 20, weight = 1.9, extra = '') {
+  return `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${weight}" stroke-linecap="round" stroke-linejoin="round" style="${extra}">${ICONS[name] || ''}</svg>`;
 }
 
-function preview(computer) {
-  const fps = computer.live ? '<span class="fps">экран · 12 кадр/с</span>' : '';
-  if (computer.live && state.frameUrl) return `<div class="preview"><img alt="Экран ${esc(computer.name)}" src="${state.frameUrl}">${fps}</div>`;
-  return `<div class="preview"><div class="win" style="left:22px;top:28px;width:120px;height:78px"><span></span></div><div class="win" style="left:90px;top:58px;width:130px;height:70px"><span></span></div>${fps}</div>`;
+function bars(width, height, gap) {
+  const bar = `width:${width}px;height:${height}px;background:#0b0c0e;border-radius:2px`;
+  return `<span style="display:flex;gap:${gap}px"><i style="${bar}"></i><i style="${bar}"></i></span>`;
+}
+
+function kindOf(computer) {
+  if (computer?.asleep) return 'sleep';
+  if (computer?.os === 'windows') return 'pc';
+  return 'mac';
+}
+
+function pv(kind, live = '', frame = '') {
+  if (frame) return `<div class="pv" style="background:#000"><img alt="" src="${frame}">${live}</div>`;
+  if (kind === 'mac') {
+    return `<div class="pv"><div class="w" style="left:30px;top:40px;width:160px;height:108px"><i></i></div><div class="w" style="left:140px;top:84px;width:170px;height:112px;background:rgba(255,255,255,.12)"><i></i></div><div class="dk"><b></b><b></b><b></b><b></b><b></b><b></b></div>${live}</div>`;
+  }
+  if (kind === 'pc') {
+    return `<div class="pv" style="background:linear-gradient(170deg,#1d3346,#121820)"><div class="w" style="left:34px;top:30px;width:190px;height:120px"><i></i></div><div class="w" style="left:150px;top:70px;width:180px;height:116px;background:rgba(255,255,255,.12)"><i></i></div><div class="tb"><b></b><b></b><b></b><b></b><b></b></div>${live}</div>`;
+  }
+  return `<div class="pv" style="background:#101114;display:grid;place-items:center;color:rgba(255,159,10,.55)">${ic('moon', 44, 1.6)}</div>`;
+}
+
+function tab(active) {
+  const items = [['computers', 'mac', 'Компьютеры'], ['inbox', 'tray', 'Входящие'], ['scenarios', 'bolt', 'Сценарии']];
+  return `<nav class="tab glass">${items.map(([id, icon, label]) => {
+    const on = id === active ? 'background:rgba(255,255,255,.18)' : '';
+    const count = id === 'inbox' && state.notes.length ? ` class="bd" data-count="${state.notes.length}"` : '';
+    return `<button data-tab="${id}" style="${on}"${count}>${ic(icon, 24)}${label}</button>`;
+  }).join('')}</nav>`;
+}
+
+function dots(active) {
+  return `<div class="dots">${[0, 1, 2].map(index => `<i class="${index === active ? 'a' : ''}"></i>`).join('')}</div>`;
+}
+
+function taskChips() {
+  return `<div class="tasks"><button class="chip" data-action="now">${ic('note', 16, 2.2, 'color:#30d158')}Teardrop <small>· Mac</small></button><button class="chip" data-action="now" style="border-color:rgba(10,132,255,.45)">${ic('send', 17, 2.6, 'color:#0a84ff')}→ ПК <small>· 64 %</small></button></div>`;
+}
+
+function searchBar() {
+  return `<label class="srch glass ${state.search ? 'has' : ''}">${ic('search', 18, 2.2)}<span class="q">${state.search ? esc(state.search) : 'Поиск или команда'}</span><input id="search" placeholder="Поиск или команда" value="${esc(state.search)}" autocomplete="off"><span class="mc">${ic('mic', 18, 2)}</span></label>`;
+}
+
+function fileTray() {
+  return `<div class="offtray" id="tray">${state.recent.map(file => `<button data-file="${esc(file.id)}">${esc(file.file.name)}</button>`).join('')}<input id="files" type="file" multiple hidden><input id="folder" type="file" webkitdirectory multiple hidden></div>`;
+}
+
+function homeCard(computer, index) {
+  const left = 14 + (index - state.index) * 350;
+  const active = index === state.index;
+  const peek = index === state.index + 1;
+  const hot = state.hotId === computer.id;
+  const frame = !state.demo && computer.live && state.frameUrl ? state.frameUrl : '';
+  let inner = pv(kindOf(computer), '', frame);
+  if (active) {
+    const status = computer.asleep
+      ? '<div class="st sl"><i></i>Спит</div>'
+      : '<div class="st on"><i></i>В сети · рядом</div>';
+    const meta = computer.id === 'macbook'
+      ? `Spotify, Xcode · батарея <span>${computer.battery ?? 82} %</span><br>Wi-Fi «Home» · <span class="mono" style="font-size:12.5px">${esc(computer.host || '192.168.1.24')}</span>`
+      : esc(computer.subtitle || '').replace(/\n/g, '<br>');
+    inner += `<div class="tx">${status}<h2>${esc(computer.name)}</h2><div class="m">${meta}</div></div><button class="big" data-action="control" data-id="${esc(computer.id)}">${ic('pad', 22, 2.2)}Управлять</button>`;
+  }
+  const glow = peek && !hot ? 'border-color:rgba(10,132,255,.5);box-shadow:0 0 24px rgba(10,132,255,.25)' : '';
+  return `<article class="card${hot ? ' hot' : ''}" data-id="${esc(computer.id)}" data-presence="${computer.asleep ? 'asleep' : 'online'}" data-action="select" style="left:${left}px;${glow}">${inner}</article>`;
 }
 
 function home() {
   const cards = filtered();
-  return `<div class="cards" id="cards">${cards.map(computer => `
-    <article class="card ${state.hotId === computer.id ? 'hot' : ''}" data-id="${esc(computer.id)}">
-      ${preview(computer)}
-      ${state.hotId === computer.id ? `<div class="dropmsg"><b>Отпустите —<br>на ${esc(computer.name)}</b><small>FlyDrop · по Wi-Fi, без облака<br>до 1 ГБ · папка уйдёт zip</small></div>` : ''}
-      <div class="meta">
-        <div class="presence"><i class="dot ${computer.asleep ? 'amber' : ''}"></i>${computer.asleep ? 'Спит' : 'В сети · рядом'}</div>
-        <h2>${esc(computer.name)}</h2>
-        <p>${esc(computer.subtitle || '')}</p>
-        ${computer.flydropSoon ? '<p class="soon">FlyDrop для Mac — скоро</p>' : `<button class="primary" data-action="control" data-id="${esc(computer.id)}">${icon('display')} Управлять</button>`}
-      </div>
-    </article>`).join('') || '<p class="soon">Ничего не нашлось</p>'}</div>
-    <div class="tasks">${state.tasks.map(task => `<button class="chip" data-action="now">${esc(task.title)} <small>· ${task.percent != null ? `${task.percent} %` : esc(task.detail || '')}</small></button>`).join('')}</div>
-    <div class="tray" id="tray">
-      ${state.recent.map(file => `<button class="filechip" data-file="${esc(file.id)}">${esc(file.file.name)}<br><small>${Math.ceil(file.file.size / 1024)} КБ</small></button>`).join('')}
-      <label class="filechip">Добавить<input id="files" type="file" multiple hidden></label>
-      <label class="filechip">Папка<input id="folder" type="file" webkitdirectory multiple hidden></label>
-    </div>`;
+  return `<div class="bk"></div>${searchBar()}<div id="deck">${cards.map((computer, index) => homeCard(computer, state.computers.indexOf(computer) === -1 ? index : state.computers.indexOf(computer))).join('') || ''}</div>${dots(Math.max(0, state.index))}${state.demo ? taskChips() : `<div class="tasks">${state.tasks.map(task => `<button class="chip" data-action="now">${esc(task.title)} <small>· ${task.percent != null ? `${task.percent} %` : ''}</small></button>`).join('')}</div>`}${fileTray()}${tab('computers')}`;
+}
+
+function header(computer) {
+  const asleep = Boolean(computer?.asleep);
+  return `<div class="hd"><button class="bb glass gbtn" data-action="home">${ic('back', 20, 2.4)}</button><div><b>${esc(computer?.name || '')}</b><small class="${asleep ? 'sl' : ''}"><i></i>${asleep ? 'спит' : 'в сети'} · <em>${esc(computer?.host || '')}</em></small></div><div class="glass gbtn" style="width:44px;height:44px;margin-left:auto">${ic('search', 18, 2.2)}</div></div>`;
+}
+
+function nowBar(hidden) {
+  const media = state.computers.find(item => item.media)?.media;
+  const playing = state.demo ? media?.playing !== false : Boolean(media?.playing);
+  const volume = state.demo ? 40 : (current()?.volume ?? 0);
+  const app = state.demo ? 'Spotify' : (media?.app || 'музыка');
+  return `<div class="np"${hidden ? ' style="display:none"' : ''}><div class="art"></div><div class="t"><b>Громкость ${volume} % · ${esc(app)} ${playing ? 'играет' : 'пауза'}</b><div class="sl"><i style="width:${volume}%"></i></div></div><button class="pp" data-action="toggle">${bars(4.5, 16, 4)}</button></div>`;
+}
+
+function satellites() {
+  return `<button class="orb" data-action="trackpad">${ic('pad', 36, 1.9)}Управлять</button>
+    <button class="sat glass" style="left:56px;top:440px" data-action="keyboard">${ic('kbd', 24)}<span>Клавиатура</span></button>
+    <button class="sat glass" style="left:337px;top:440px" data-action="volume">${ic('vol', 24)}<span>Громкость</span></button>
+    <button class="sat glass" style="left:56px;top:628px" data-action="media">${ic('apps', 22)}<span>Приложения</span></button>
+    <button class="sat glass" style="left:337px;top:628px" data-action="power">${ic('power', 24)}<span>Питание</span></button>`;
 }
 
 function control() {
-  const computer = current();
-  const media = computer?.media;
-  return `<div class="control"><div class="top"><button class="back glass" data-action="home">←</button><b>${esc(computer?.name || '')}</b><span class="dot"></span></div>
-    <div class="stage">
-      ${preview(computer || {})}
-      <div class="radar">
-        <button class="sat glass tl" data-action="keyboard">${icon('keyboard')}<span>Клавиатура</span></button>
-        <button class="sat glass tr" data-action="volume">${icon('volume')}<span>Громкость</span></button>
-        <button class="sat glass bl" data-action="media">${icon('apps')}<span>Приложения</span></button>
-        <button class="sat glass br" data-action="power">${icon('power')}<span>Питание</span></button>
-        <button class="orb" data-action="trackpad">${icon('display')}Управлять</button>
-      </div>
-    </div>
-    ${media ? `<div class="nowbar"><div class="art"></div><div class="t"><b>Громкость ${computer.volume ?? 0} % · ${esc(media.app || '')} ${media.playing ? 'играет' : 'пауза'}</b></div><button data-action="toggle">${media.playing ? '❚❚' : '▶'}</button></div>` : ''}</div>`;
+  const computer = current() || {};
+  const live = `<div class="live"><i></i>экран · 12 кадр/с</div>`;
+  const frame = !state.demo && computer.live && state.frameUrl ? state.frameUrl : '';
+  return `<div class="bk"></div>${header(computer)}<div class="prev">${pv(kindOf(computer) === 'sleep' ? 'pc' : kindOf(computer), live, frame)}</div>${satellites()}${nowBar(state.sheet === 'power')}${sheet()}`;
 }
 
 function trackpad() {
-  return `<div class="track"><div class="top"><button class="back glass" data-action="control">←</button><b>${esc(current()?.name || '')}</b></div>
-    <div class="pad" id="pad"></div>
-    <div class="mods">
-      ${['Ctrl', 'Alt', 'Win', 'Tab', 'Esc'].map(key => `<button data-mod="${key}" class="${state.mods.has(key) ? 'on' : ''}">${key}</button>`).join('')}
-      <button data-action="paste-remote">Буфер</button>
+  const computer = current();
+  const dot = computer?.asleep ? '#ff9f0a' : '#30d158';
+  return `<div class="pad" id="pad"></div>
+    <div class="trail" style="left:120px;top:384px;width:80px;transform:rotate(-24deg)"></div>
+    <div class="trail" style="left:158px;top:426px;width:80px;transform:rotate(-24deg)"></div>
+    <div class="tp" style="left:196px;top:320px"></div><div class="tp" style="left:236px;top:364px"></div>
+    <button class="topg glass" data-action="control">${ic(computer?.os === 'windows' ? 'pc' : 'mac', 18)}${esc(computer?.name || '')}<span style="color:${dot};font-size:12px">●</span>${ic('chev', 14, 2.4, 'transform:rotate(90deg);opacity:.6')}</button>
+    <div class="hint" style="bottom:170px">Два пальца — прокрутка · Три вверх — Win+Tab<br>Свайп по краю — следующий компьютер</div>
+    <div class="keys">${['Ctrl', 'Alt', 'Win', 'Tab', 'Esc'].map(key => `<button data-mod="${key}" class="${state.mods.has(key) ? 'on' : ''}">${key}</button>`).join('')}</div>
+    <div class="tool glass"><button class="on" data-action="trackpad">${ic('pad', 24)}</button><button data-action="keyboard">${ic('kbd', 24)}</button><button data-action="paste-remote">${ic('clip', 22)}</button><button data-action="media">${ic('apps', 22)}</button><button data-action="power">${ic('power', 23)}</button></div>${state.sheet ? sheet() : ''}`;
+}
+
+function drop() {
+  return `<div class="bk"></div>
+    <div class="hint" style="top:70px;font-size:14px;color:rgba(255,255,255,.6)">Тяните на компьютер — FlyDrop отправит сам<br><span style="font-size:12.5px;color:rgba(255,255,255,.4)">← MacBook Pro: FlyDrop для Mac — скоро</span></div>
+    <div class="card dim" style="left:-300px"></div>
+    <div class="card drop" data-id="self" style="left:28px;width:337px">${pv('pc')}<div class="dropmsg"><b>Отпустите —<br>на Windows ПК</b><small>FlyDrop · по Wi-Fi, без облака<br>до 1 ГБ · папка уйдёт zip</small></div></div>
+    <div class="card dim" style="left:378px"></div>
+    <div class="ghost" style="left:205px;top:520px"><span>${ic('send', 15, 2.8)}</span></div>
+    <div class="hint" style="top:648px;left:180px;right:auto;font-size:12.5px;color:#fff">IMG_2041.jpg · 3,1 МБ</div>
+    <div class="trayt glass"><div class="l"><span>Недавние на iPhone</span><span>Фото · Файлы · Буфер</span></div><div class="r">
+      <label style="border:2px dashed rgba(255,255,255,.35);background:transparent"><input id="files" type="file" multiple hidden></label>
+      <div style="background:#f2f2f4">PDF</div>
+      <div style="background:linear-gradient(135deg,#7a9aa6,#2c3a40)"></div>
+      <div style="background:#f2f2f4">ZIP</div>
+      <div style="background:#26292e;color:#c7c9ce;font-size:20px">Aa</div>
     </div></div>`;
 }
 
 function now() {
-  return `<div class="list"><div class="top"><button class="back glass" data-action="home">←</button><div><b>Сейчас</b><div class="soon">${state.tasks.length} задачи</div></div></div>
-    ${state.tasks.map(task => `<article class="row"><h3>${esc(task.title)}</h3><p>${esc(task.detail || '')}</p>${task.percent != null ? `<div class="progress"><i style="width:${task.percent}%"></i></div><button data-action="cancel">Отменить</button>` : ''}</article>`).join('') || '<p class="soon">Фоновых задач нет</p>'}
-    ${state.computers.filter(computer => computer.asleep).map(computer => `<article class="row"><h3>${esc(computer.name)}</h3><p>Бэкап в ${esc(computer.backup || '03:00')} — разбудим сами</p><button class="wake" data-action="wake" data-id="${esc(computer.id)}">Разбудить</button></article>`).join('')}</div>`;
+  const music = state.computers.find(item => item.media);
+  const fly = state.tasks.find(task => task.kind === 'flydrop');
+  const mini = state.computers.find(item => item.asleep) || state.computers.find(item => item.id === 'mini');
+  const flyWidth = fly?.percent ?? 64;
+  return `<div class="bk"></div>
+    <div class="ttl"><b>Сейчас</b><small>${state.tasks.length} задачи идут параллельно</small></div>
+    <div class="trow" style="top:150px"><div class="h">${ic('mac', 18)}${esc(music?.name || 'MacBook Pro')}<span class="s" style="color:#30d158"><i></i>в сети</span></div>
+      <div class="b"><div class="art" style="width:52px;height:52px"></div><div class="t"><b>${esc(music?.media?.title || 'Teardrop')}</b><small>${esc(state.tasks.find(task => task.kind === 'media')?.detail || 'Massive Attack · Spotify · 2:14')}</small></div><div class="np" style="position:static;width:44px;height:44px;padding:0;border:0;background:none"><button class="pp" data-action="toggle">${ic('pause', 18, 3)}</button></div></div></div>
+    ${fly ? `<div class="trow" style="top:300px;border-color:rgba(10,132,255,.45);box-shadow:0 0 22px rgba(10,132,255,.18)"><div class="h">${ic('pc', 18)}Windows ПК<span class="s" style="color:#30d158"><i></i>в сети</span></div>
+      <div class="b"><div style="width:52px;height:52px;border-radius:12px;background:linear-gradient(135deg,#c9b79a,#5d7a85);flex:none"></div><div class="t"><b>${esc(fly.title)}</b><small>${esc(fly.detail || '')}</small><div class="pbar"><i style="width:${flyWidth}%;background:#0a84ff;box-shadow:0 0 10px rgba(10,132,255,.8)"></i></div></div><button class="rb" data-action="cancel">${ic('x', 16, 2.6)}</button></div></div>` : ''}
+    ${mini ? `<div class="trow" style="top:466px"><div class="h">${ic('mini', 18)}${esc(mini.name)}<span class="s" style="color:#ff9f0a"><i></i>${mini.asleep ? 'спит 3 ч' : 'в сети'}</span></div>
+      <div class="b"><div class="t"><b>Бэкап в ${esc(mini.backup || '03:00')}</b><small>разбудим по Wake-on-LAN сами</small></div><button class="rb" style="background:#ff9f0a;color:#0b0c0e" data-action="wake" data-id="${esc(mini.id)}">${ic('wake', 16, 2.4)}&nbsp;Разбудить</button></div></div>` : ''}
+    <div class="hint" style="top:610px">Сведите пальцы на главной, чтобы попасть сюда</div>
+    ${tab('computers')}`;
 }
 
 function media() {
-  const computer = current();
-  const item = computer?.media || { title: 'Ничего не играет', artist: '', playing: false, app: '' };
-  const apps = computer?.apps || [];
-  return `<div class="media"><div class="top"><button class="back glass" data-action="control">←</button></div>
+  const computer = current() || {};
+  const item = computer.media || { title: 'Teardrop', artist: 'Massive Attack', app: 'Spotify', playing: true };
+  const apps = computer.apps?.length ? computer.apps : [
+    { id: 'Spotify', name: 'Spotify', running: true, glyph: 'note' },
+    { id: 'Safari', name: 'Safari', running: true, glyph: 'search' },
+    { id: 'Terminal', name: 'Терминал', running: false, glyph: 'term' },
+    { id: 'Xcode', name: 'Xcode', running: false, glyph: 'screen' },
+    { id: 'more', name: 'Ещё', running: false, glyph: 'plus' },
+  ];
+  const dot = computer.asleep ? '#ff9f0a' : '#30d158';
+  const iconFor = app => {
+    if (app.glyph === 'term') return '<i style="font-size:15px" class="mono">&gt;_</i>';
+    if (app.glyph === 'screen') return `<i>${ic('screen', 24, 2)}</i>`;
+    if (app.glyph === 'plus') return `<i>${ic('plus', 22, 2)}</i>`;
+    if (app.glyph === 'search') return `<i class="${app.running ? 'run' : ''}">${ic('search', 24, 2)}</i>`;
+    return `<i class="${app.running ? 'run' : ''}">${ic(app.glyph || 'note', 24, 2)}</i>`;
+  };
+  return `<div class="bk"></div>
+    <button class="topg glass" data-action="control">${ic('mac', 18)}${esc(computer.name || 'MacBook Pro')}<span style="color:${dot};font-size:12px">●</span>${ic('chev', 14, 2.4, 'transform:rotate(90deg);opacity:.6')}</button>
     <div class="cover"></div>
-    <h2>${esc(item.title)}</h2><p>${esc(item.artist)} ${item.app ? `· ${esc(item.app)}` : ''}</p>
-    <div class="transport"><button data-action="prev">⏮</button><button class="play" data-action="toggle">${item.playing ? '❚❚' : '▶'}</button><button data-action="next">⏭</button></div>
-    <h3>Открыть на ${esc(computer?.name || '')}</h3>
-    <div class="apps">${apps.map(app => `<button data-action="launch" data-id="${esc(app.id)}"><div class="appico ${app.running ? 'run' : ''}">${esc(app.name.slice(0, 1))}</div>${esc(app.name)}</button>`).join('') || '<p class="soon">Список приложений появится с компьютера</p>'}</div></div>`;
+    <div class="trk"><b>${esc(item.title)}</b><small>${esc(item.artist)} · ${esc(item.app || 'Spotify')} на ${esc(computer.name || 'MacBook Pro')}</small></div>
+    <div class="pos"><i></i><span style="left:0">2:14</span><span style="right:0">5:30</span></div>
+    <div class="ctl"><button data-action="prev">${ic('prev', 30, 2)}</button><button class="pl" data-action="toggle">${bars(7, 26, 6)}</button><button data-action="next">${ic('next', 30, 2)}</button></div>
+    <div class="apl"><div class="l">Открыть на ${esc(computer.name || 'MacBook')}</div><div class="r">${apps.map(app => `<button ${app.id === 'more' ? '' : `data-action="launch" data-id="${esc(app.id)}"`}>${iconFor(app)}${esc(app.name)}</button>`).join('')}</div></div>`;
 }
 
 function inbox() {
-  return `<div class="list"><h2>Входящие</h2><p class="soon">буфер и уведомления со всех компьютеров</p>
-    <div class="clip">${state.clipboard ? `<div class="soon">Буфер · ${esc(state.clipboard.from)} · ${esc(state.clipboard.age || '')}</div><div class="mono">${esc(state.clipboard.text)}</div><button class="big" data-action="paste-phone">Вставить на iPhone</button>` : '<p>Буфер пуст</p>'}</div>
-    ${state.notes.map(note => `<div class="note"><span class="dot ${note.ok ? '' : 'amber'}"></span><div><b>${esc(note.title)}</b><div class="soon">${esc(note.body)}</div></div></div>`).join('')}</div>`;
+  const tones = { blue: '#0a84ff', green: '#30d158', muted: '#c7c9ce' };
+  const icons = { blue: 'send', green: 'check', muted: 'restart' };
+  return `<div class="bk"></div>
+    <div class="ttl"><b>Входящие</b><small>буфер и уведомления со всех компьютеров</small></div>
+    <div class="clipc">${state.clipboard ? `<div class="h">${ic('clip', 18)}Буфер · ${esc(state.clipboard.from)} · ${esc(state.clipboard.age || '')}</div><div class="v mono">${esc(state.clipboard.text)}</div><button class="big" data-action="paste-phone">${ic('check', 20, 2.6)}Вставить на iPhone</button>` : '<div class="h">Буфер пуст</div>'}</div>
+    <div class="sub">Уведомления</div>
+    ${state.notes.slice(0, 3).map((note, index) => {
+      const tone = note.tone || (note.ok ? 'green' : 'muted');
+      return `<div class="nt" style="top:${446 + index * 84}px"><div class="ico" style="color:${tones[tone] || tones.muted}">${ic(icons[tone] || 'restart', 20, tone === 'green' ? 2.4 : 2.2)}</div><div class="t"><b>${esc(note.title)}</b><small>${esc(note.body)}</small></div><span class="w">${esc(note.time || '')}</span></div>`;
+    }).join('')}
+    ${tab('inbox')}`;
+}
+
+function lockClock() {
+  if (state.demo || shot) return { date: 'Воскресенье, 18 октября', time: '21:27' };
+  const now = new Date();
+  const date = new Intl.DateTimeFormat('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' }).format(now);
+  const time = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(now);
+  return { date: date.charAt(0).toUpperCase() + date.slice(1), time };
+}
+
+function lock() {
+  const clock = lockClock();
+  const transfer = state.tasks.find(task => task.kind === 'flydrop');
+  const mediaComputer = state.computers.find(computer => computer.media);
+  const media = mediaComputer?.media;
+  const widgets = state.demo
+    ? [['MacBook', '82 %', '#30d158'], ['ПК', 'в сети', '#30d158'], ['mac-mini', 'спит', '#ff9f0a']]
+    : state.computers.slice(0, 3).map(computer => [computer.name.split(' ')[0], computer.battery ? `${computer.battery} %` : computer.asleep ? 'спит' : 'в сети', computer.asleep ? '#ff9f0a' : '#30d158']);
+  return `<div class="lk"></div>
+    <div class="clock"><div>${esc(clock.date)}</div><b>${esc(clock.time)}</b></div>
+    <div class="wd">${widgets.map(([label, value, color]) => `<div>${esc(label)}<b style="color:${color}">${esc(value)}</b></div>`).join('')}</div>
+    ${transfer ? `<div class="la" style="bottom:252px"><div class="t"><div class="lg" style="background:#0a84ff">${ic('send', 22, 2.4)}</div><div><b>FlyDrop → ${esc(computerById(transfer.computerId)?.name || 'Windows ПК')}</b><small>${esc(transfer.title.includes('IMG') ? 'IMG_2041.jpg' : transfer.title)}</small></div><span class="pc">${transfer.percent || 0}%</span></div><div class="bar"><i style="width:${transfer.percent || 0}%"></i></div><div class="ft"><span>${esc(transfer.detail?.split(' · ')[0] || '')}</span><span>${esc(transfer.detail?.split(' · ')[1] || '')}</span></div></div>` : ''}
+    ${media ? `<div class="la" style="bottom:118px"><div class="t"><div class="art" style="width:42px;height:42px;border-radius:12px"></div><div><b>${esc(media.title)}</b><small>на ${esc(mediaComputer.name)}</small></div><div class="mc"><button data-action="prev">${ic('prev', 22, 2)}</button><span style="display:flex;gap:4px"><i style="width:5px;height:20px;background:#fff;border-radius:2px"></i><i style="width:5px;height:20px;background:#fff;border-radius:2px"></i></span><button data-action="next">${ic('next', 22, 2)}</button></div></div></div>` : ''}
+    <div class="lkb"><button class="glass gbtn" data-action="hold-lock">${ic('bolt', 22)}</button><button class="glass gbtn" data-action="trackpad">${ic('pad', 22)}</button></div>`;
 }
 
 function scenarios() {
   const caps = state.experiments;
-  return `<div class="list"><h2>Сценарии</h2>
-    <article class="row"><h3>Бэкап mac-mini</h3><p>Каждую ночь в 03:00 Пульт шлёт Wake-on-LAN.</p><button class="primary" data-action="schedule">Запомнить 03:00</button></article>
-    <article class="row"><h3>Экран блокировки</h3><p>Живая карточка в приложении и то, что браузер реально умеет снаружи.</p><button class="primary" data-action="lock">Открыть</button><button class="primary" data-action="push">Включить уведомления</button></article>
-    <ul class="caps">${Object.entries(caps).map(([key, value]) => `<li><b>${esc(key)}</b> — ${esc(value)}</li>`).join('')}</ul></div>`;
-}
-
-function lock() {
-  const transfer = state.tasks.find(task => task.kind === 'flydrop');
-  const media = state.computers.find(computer => computer.media)?.media;
-  return `<div class="lock"><div class="status"><span></span><span>${media ? '♪' : ''}</span></div>
-    <div>Воскресенье, 18 октября</div><div class="clock">21:27</div>
-    <div class="widgets">${state.computers.slice(0, 3).map(computer => `<div>${esc(computer.name.split(' ')[0])}<b style="color:${computer.asleep ? 'var(--amber)' : 'var(--green)'}">${computer.battery ? `${computer.battery} %` : computer.asleep ? 'спит' : 'в сети'}</b></div>`).join('')}</div>
-    ${transfer ? `<div class="la"><b>FlyDrop → ${esc(computerById(transfer.computerId)?.name || '')}</b><div class="progress"><i style="width:${transfer.percent || 0}%"></i></div><small>${transfer.percent || 0} %</small></div>` : ''}
-    ${media ? `<div class="la"><div class="art"></div><b>${esc(media.title)}</b><small>${esc(media.artist)}</small><div><button data-action="prev">⏮</button><button data-action="toggle">${media.playing ? '❚❚' : '▶'}</button><button data-action="next">⏭</button></div></div>` : ''}
-    <p class="soon">Настоящий Dynamic Island сайту недоступен. Полоска сверху — его изображение. Кнопка ниже просит систему показать медиакарточку и push.</p>
-    <button class="primary" data-action="hold-lock">Держать на блокировке</button>
-    <button class="back" data-action="scenarios">Закрыть</button></div>`;
+  return `<div class="bk"></div>
+    <div class="ttl"><b>Сценарии</b><small>Wake-on-LAN и то, что браузер умеет снаружи</small></div>
+    <div class="trow" style="top:160px"><div class="h">${ic('mini', 18)}mac-mini</div><div class="b"><div class="t"><b>Бэкап в 03:00</b><small>Каждую ночь Пульт шлёт Wake-on-LAN.</small></div><button class="rb" style="background:#ff9f0a;color:#0b0c0e" data-action="schedule">Запомнить</button></div></div>
+    <div class="trow" style="top:300px"><div class="b"><div class="t"><b>Экран блокировки</b><small>Живые карточки показывает система, не страница.</small></div><button class="rb" data-action="lock">Открыть</button></div><div class="b"><button class="rb" data-action="push">Уведомления</button></div></div>
+    <ul class="caps">${Object.entries(caps).map(([key, value]) => `<li><b>${esc(key)}</b> — ${esc(value)}</li>`).join('')}</ul>
+    ${tab('scenarios')}`;
 }
 
 function sheet() {
   if (state.sheet === 'power') {
     const computer = current();
     const transfer = state.tasks.find(task => task.kind === 'flydrop');
-    return `<div class="sheet glass"><div class="handle"></div><h3>Питание · ${esc(computer?.name || '')}</h3>
-      ${transfer ? `<p class="warn">FlyDrop ещё идёт: ${transfer.percent || 0} % — выключение подождёт</p>` : ''}
-      ${state.warning ? `<p class="warn">${esc(state.warning)}</p>` : ''}
-      <div class="grid3"><button data-action="sleep">Сон</button><button data-action="lock-pc">Блокировка</button><button data-action="restart">Перезагрузка</button></div>
-      <button class="hold" id="hold" data-action="hold-down"><i style="width:${state.hold}%"></i>Удерживайте, чтобы выключить</button>
-      ${state.computers.filter(item => item.asleep).map(item => `<div class="row"><b>${esc(item.name)}</b><p>спит · Wake-on-LAN</p><button class="wake" data-action="wake" data-id="${esc(item.id)}">Разбудить</button></div>`).join('')}</div>`;
+    const asleep = state.computers.find(item => item.asleep);
+    return `<div class="shade" data-action="close-sheet"></div>
+      <div class="sheetg glass" style="background:rgba(40,42,46,.72)"><div class="gr"></div><h3>Питание · ${esc(computer?.name || '')}</h3>${transfer ? `<p>FlyDrop ещё идёт: ${transfer.percent || 0} % — выключение подождёт</p>` : '<p>Сон, блокировка или выключение</p>'}
+      ${state.warning ? `<p class="pnote"><i></i>${esc(state.warning)}</p>` : ''}
+      <div class="pw"><button data-action="sleep">${ic('moon', 24)}Сон</button><button data-action="lock-pc">${ic('lock', 24)}Блокировка</button><button data-action="restart">${ic('restart', 24)}Перезагрузка</button></div>
+      <button class="hold" id="hold"><i style="width:${state.hold}%"></i><span>${ic('power', 22, 2.2)}Удерживайте, чтобы выключить</span></button>
+      ${asleep ? `<div class="wol">${ic('mini', 22)}<div>${esc(asleep.name)}<br><small>спит · Wake-on-LAN</small></div><button class="rb" data-action="wake" data-id="${esc(asleep.id)}">Разбудить</button></div>` : ''}</div>`;
   }
   if (state.sheet === 'keyboard') {
     const keys = ['й', 'ц', 'у', 'к', 'е', 'н', 'г', 'ш', 'щ', 'з', 'х', 'ъ', 'ф', 'ы', 'в', 'а', 'п', 'р', 'о', 'л', 'д', 'ж', 'э', 'я', 'ч', 'с', 'м', 'и', 'т', 'ь', 'б', 'ю', ' '];
-    return `<div class="sheet glass"><div class="handle"></div><div class="mods">${keys.map(key => `<button class="key" data-key="${esc(key)}">${key === ' ' ? 'пробел' : esc(key)}</button>`).join('')}<button data-action="close-sheet">Закрыть</button></div></div>`;
+    return `<div class="shade" data-action="close-sheet"></div><div class="sheetg glass" style="background:rgba(40,42,46,.72)"><div class="gr"></div><h3>Клавиатура</h3><p>Символ сразу уходит на компьютер</p><div class="board">${keys.map(key => `<button data-key="${esc(key)}">${key === ' ' ? 'пробел' : esc(key)}</button>`).join('')}</div><button class="pairgo" style="position:static;width:100%;margin-top:16px" data-action="close-sheet">Закрыть</button></div>`;
   }
   if (state.sheet === 'volume') {
     const computer = current();
-    return `<div class="sheet glass"><div class="handle"></div><h3>Громкость ${computer?.volume ?? 0} %</h3><input id="vol" type="range" min="0" max="100" value="${computer?.volume ?? 0}"><button data-action="close-sheet">Закрыть</button></div>`;
+    return `<div class="shade" data-action="close-sheet"></div><div class="sheetg glass" style="background:rgba(40,42,46,.72)"><div class="gr"></div><h3>Громкость</h3><p>${computer?.volume ?? 0} %</p><input class="voline" id="vol" type="range" min="0" max="100" value="${computer?.volume ?? 0}"><button class="pairgo" style="position:static;width:100%;margin-top:24px" data-action="close-sheet">Закрыть</button></div>`;
   }
   return '';
 }
 
 function pairing() {
   const digits = state.code.padEnd(6, ' ').slice(0, 6).split('');
-  return `<div class="pair"><div class="status"><span>9:41</span></div><h1>Пульт</h1><p>Введите код с экрана компьютера. Без кода управление закрыто.</p>
+  return `<div class="bk"></div><div class="ttl"><b>Пульт</b><small>Введите код с экрана компьютера. Без кода управление закрыто.</small></div>
     <div class="digits">${digits.map((digit, index) => `<input inputmode="numeric" maxlength="1" data-digit="${index}" value="${digit.trim()}">`).join('')}</div>
-    <p class="err">${esc(state.error)}</p>
-    <button class="big" data-action="submit-code">Подключить</button>
-    <p><a href="/setup">Если Safari не доверяет сертификату</a></p></div>`;
+    ${state.error ? `<div class="notice" style="top:376px"><i></i><div><b>Не вышло подключить</b><small>${esc(state.error)}</small></div></div>` : '<p class="err"></p>'}
+    <button class="pairgo" data-action="submit-code">Подключить</button>
+    <p class="setuplink"><a href="/setup">Если Safari не доверяет сертификату</a></p>`;
+}
+
+function notice() {
+  if (shot) return '';
+  const blocked = state.computers.find(item => item.unavailable);
+  if (!blocked?.unavailable) return '';
+  return `<div class="notice" role="status"><i></i><div><b>Управление недоступно</b><small>${esc(blocked.unavailable)}</small></div></div>`;
 }
 
 function shell(body) {
-  if (state.phase !== 'app') return pairing();
-  const transfer = state.tasks.find(task => task.kind === 'flydrop');
-  const island = transfer ? `<button class="island" data-action="lock"><b>${transfer.percent || 0}%</b><span>♪</span></button>` : '';
-  const tabs = state.screen === 'home' && !state.sheet ? `<nav class="tabbar glass">
-      <button class="${state.tab === 'computers' ? 'on' : ''}" data-tab="computers">${icon('display')}Компьютеры</button>
-      <button class="${state.tab === 'inbox' ? 'on' : ''}" data-tab="inbox">${icon('inbox')}Входящие ${state.notes.length ? `<span class="badge">${state.notes.length}</span>` : ''}</button>
-      <button class="${state.tab === 'scenarios' ? 'on' : ''}" data-tab="scenarios">${icon('bolt')}Сценарии</button>
-    </nav>` : '';
-  const blocked = state.computers.find(item => item.unavailable);
-  const banner = blocked ? `<p class="warn banner">${esc(blocked.unavailable)}</p>` : '';
-  return `<div class="status"><span>9:41</span><span></span></div>${island}
-    ${state.screen === 'home' ? `<label class="search glass">${icon('search')}<input id="search" placeholder="Поиск или команда" value="${esc(state.search)}">${icon('mic')}</label>` : ''}
-    ${banner}
-    <div class="screen">${body}</div>${sheet()}${tabs}`;
+  return `<div class="stage">${body}${notice()}</div>`;
 }
 
 function screenBody() {
+  if (state.phase !== 'app') return pairing();
   if (state.screen === 'control') return control();
   if (state.screen === 'trackpad') return trackpad();
+  if (state.screen === 'drop') return drop();
   if (state.screen === 'now') return now();
   if (state.screen === 'media') return media();
   if (state.screen === 'lock') return lock();
@@ -264,10 +422,30 @@ function screenBody() {
   return home();
 }
 
+function applyShot(id) {
+  state.screen = 'home';
+  state.tab = 'computers';
+  state.sheet = null;
+  state.index = 0;
+  if (id === 'control' || id === 'trackpad' || id === 'power' || id === 'drop') {
+    state.index = Math.max(0, state.computers.findIndex(computer => computer.id === 'self'));
+  }
+  if (id === 'control' || id === 'power') state.screen = 'control';
+  if (id === 'trackpad') { state.screen = 'trackpad'; state.mods.add('Ctrl'); }
+  if (id === 'now') state.screen = 'now';
+  if (id === 'media') state.screen = 'media';
+  if (id === 'inbox') state.tab = 'inbox';
+  if (id === 'power') { state.sheet = 'power'; state.hold = 38; }
+  if (id === 'drop') state.screen = 'drop';
+  if (id === 'lock') state.screen = 'lock';
+}
+
 function render() {
   const search = document.querySelector('#search');
   const keep = search && document.activeElement === search ? search.value : null;
-  root.innerHTML = shell(state.phase === 'app' ? screenBody() : '');
+  const mini = state.computers.find(computer => computer.id === 'mini');
+  root.dataset.mini = mini ? (mini.asleep ? 'asleep' : 'online') : '';
+  root.innerHTML = shell(screenBody());
   if (keep != null) {
     const field = document.querySelector('#search');
     if (field) { field.value = keep; field.focus(); }
@@ -278,6 +456,7 @@ function render() {
   bindVolume();
   bindDigits();
   bindCards();
+  document.body.dataset.ready = '1';
 }
 
 async function send(type, payload) {
@@ -606,6 +785,14 @@ function bindDigits() {
 }
 
 async function main() {
+  if (shot && SHOTS[shot]) {
+    document.documentElement.classList.add('shot');
+    seedDemo({ name: 'Windows ПК' });
+    applyShot(SHOTS[shot]);
+    state.phase = 'app';
+    render();
+    return;
+  }
   state.experiments = await bootExperiments();
   try {
     session = await connect();

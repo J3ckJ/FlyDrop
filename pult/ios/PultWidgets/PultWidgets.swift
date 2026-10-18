@@ -54,7 +54,7 @@ struct ComputerWidgetView: View {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(entry.computers.prefix(3)) { computer in
                     HStack {
-                        Circle().fill(computer.asleep ? Color.orange : Color.green).frame(width: 6, height: 6)
+                        Circle().fill(computer.asleep ? Color(red: 1, green: 0.624, blue: 0.039) : Color(red: 0.188, green: 0.820, blue: 0.345)).frame(width: 6, height: 6)
                         Text(computer.name).font(.caption2)
                         Spacer()
                         Text(computer.battery.map { "\($0)%" } ?? computer.detail).font(.caption2)
@@ -67,7 +67,7 @@ struct ComputerWidgetView: View {
                 ForEach(entry.computers.prefix(3)) { computer in
                     Text("\(computer.name) · \(computer.asleep ? "спит" : "в сети")")
                         .font(.caption)
-                        .foregroundStyle(computer.asleep ? Color.orange : Color.green)
+                        .foregroundStyle(computer.asleep ? Color(red: 1, green: 0.624, blue: 0.039) : Color(red: 0.188, green: 0.820, blue: 0.345))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -83,7 +83,7 @@ struct PultLiveActivityWidget: Widget {
             VStack(alignment: .leading, spacing: 8) {
                 if !context.state.flydropTitle.isEmpty {
                     Text("FlyDrop → \(context.state.flydropHost)").font(.headline)
-                    ProgressView(value: Double(context.state.flydropPercent), total: 100)
+                    ProgressView(value: Double(context.state.flydropPercent), total: 100).tint(Color(red: 0.039, green: 0.518, blue: 1))
                     Text("\(context.state.flydropTitle) · \(context.state.flydropPercent) %").font(.caption)
                 }
                 if !context.state.mediaTitle.isEmpty {

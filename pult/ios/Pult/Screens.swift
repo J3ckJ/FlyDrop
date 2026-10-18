@@ -7,29 +7,15 @@ struct RootView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color.black.ignoresSafeArea()
+            Color(red: 0.043, green: 0.047, blue: 0.055).ignoresSafeArea()
             VStack(spacing: 0) {
-                statusBar
                 if model.phase == .app {
-                    if model.screen == .home { search }
+                    if model.screen == .home && model.tab == .computers { search }
                     screen
-                    if model.screen == .home && model.sheet == nil { tabBar }
+                    if model.sheet == nil && (model.screen == .home || model.screen == .now) { tabBar }
                 } else {
                     PairingView(model: model)
                 }
-            }
-            if let transfer = model.tasks.first(where: { $0.kind == "flydrop" }), model.phase == .app {
-                Button { model.screen = .lock } label: {
-                    HStack {
-                        Text("\(transfer.percent ?? 0)%").foregroundStyle(Color(red: 0.04, green: 0.52, blue: 1))
-                        Text("♪")
-                    }
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 12)
-                    .frame(height: 36)
-                    .background(Capsule().fill(Color.black).overlay(Capsule().stroke(Color.white.opacity(0.12))))
-                }
-                .padding(.top, 8)
             }
         }
         .onAppear { model.startDiscovery() }
@@ -44,15 +30,6 @@ struct RootView: View {
         Binding(get: { model.sheet }, set: { model.sheet = $0 })
     }
 
-    private var statusBar: some View {
-        HStack {
-            Text("9:41").fontWeight(.semibold)
-            Spacer()
-        }
-        .padding(.horizontal, 28)
-        .padding(.top, 8)
-    }
-
     private var search: some View {
         HStack {
             Image(systemName: "magnifyingglass")
@@ -61,9 +38,9 @@ struct RootView: View {
                 .onSubmit { model.runSearch() }
             Image(systemName: "mic")
         }
-        .padding(.horizontal, 12)
-        .frame(height: 44)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 16)
+        .frame(height: 46)
+        .background(.ultraThinMaterial, in: Capsule())
         .padding(.horizontal, 16)
         .padding(.top, 8)
     }
@@ -93,10 +70,10 @@ struct RootView: View {
                         Text(tab.title).font(.caption2)
                     }
                     .frame(maxWidth: .infinity, minHeight: 52)
-                    .background(model.tab == tab ? Color.white.opacity(0.16) : .clear, in: RoundedRectangle(cornerRadius: 18))
+                    .background(model.tab == tab ? Color.white.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 24))
                     .overlay(alignment: .topTrailing) {
                         if tab == .inbox && !model.notes.isEmpty {
-                            Text("\(model.notes.count)").font(.caption2.bold()).padding(4).background(Color.white, in: Capsule()).foregroundStyle(.black).offset(x: -16, y: 4)
+                            Text("\(model.notes.count)").font(.caption2.bold()).padding(4).background(Color(red: 1, green: 0.271, blue: 0.227), in: Capsule()).foregroundStyle(.white).offset(x: -16, y: 4)
                         }
                     }
                 }
@@ -104,9 +81,10 @@ struct RootView: View {
             }
         }
         .padding(6)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
-        .padding(.horizontal, 12)
-        .padding(.bottom, 12)
+        .frame(height: 62)
+        .background(.ultraThinMaterial, in: Capsule())
+        .padding(.horizontal, 20)
+        .padding(.bottom, 22)
         .foregroundStyle(.white)
     }
 
@@ -156,7 +134,18 @@ struct PairingView: View {
                     .foregroundStyle(Color(red: 0.04, green: 0.52, blue: 1))
                 }
             }
-            Text(model.error).foregroundStyle(Color(red: 1, green: 0.27, blue: 0.23)).frame(minHeight: 20)
+            if !model.error.isEmpty {
+                HStack(alignment: .top, spacing: 12) {
+                    Circle().fill(Color(red: 1, green: 0.624, blue: 0.039)).frame(width: 9, height: 9).padding(.top, 5)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Не вышло подключить").font(.system(size: 15, weight: .bold))
+                        Text(model.error).font(.system(size: 13)).foregroundStyle(Color(white: 0.7))
+                    }
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+            }
             Button("Подключить") { Task { await model.pair() } }
                 .buttonStyle(PrimaryButton())
             Button("Открыть демо без компьютера") { model.openDemo() }
@@ -236,19 +225,15 @@ struct HomeView: View {
             }
             Text(computer.name).font(.largeTitle.bold())
             Text(computer.subtitle).font(.subheadline).foregroundStyle(Color(white: 0.7))
-            if computer.flydropSoon {
-                Text("FlyDrop для Mac — скоро").foregroundStyle(Color(white: 0.55))
-            } else {
-                Button { model.index = model.computers.firstIndex(where: { $0.id == computer.id }) ?? offset; model.screen = .control } label: {
-                    Label("Управлять", systemImage: "display")
-                }
-                .buttonStyle(PrimaryButton())
+            Button { model.index = model.computers.firstIndex(where: { $0.id == computer.id }) ?? offset; model.screen = .control } label: {
+                Label("Управлять", systemImage: "rectangle.and.hand.point.up.left")
             }
+            .buttonStyle(PrimaryButton())
             Spacer(minLength: 0)
         }
-        .padding(14)
-        .frame(width: 320, height: 460, alignment: .topLeading)
-        .background(Color(red: 0.06, green: 0.07, blue: 0.08), in: RoundedRectangle(cornerRadius: 28))
+        .padding(20)
+        .frame(width: 338, height: 520, alignment: .topLeading)
+        .background(Color(red: 0.086, green: 0.094, blue: 0.110), in: RoundedRectangle(cornerRadius: 42))
         .containerRelativeFrame(.horizontal, count: 1, spacing: 12, alignment: .center)
     }
 }
@@ -257,57 +242,76 @@ struct ControlView: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        VStack {
+        VStack(spacing: 0) {
             TopBar(title: model.current?.name ?? "", back: .home, model: model)
             preview
             ZStack {
-                satellite("keyboard", "Клавиатура", .topLeading) { model.sheet = .keyboard }
-                satellite("speaker.wave.2", "Громкость", .topTrailing) { model.sheet = .volume }
-                satellite("square.grid.2x2", "Приложения", .bottomLeading) { model.screen = .media }
-                satellite("power", "Питание", .bottomTrailing) { model.sheet = .power }
+                satellite("keyboard", "Клавиатура", x: 56, y: 70) { model.sheet = .keyboard }
+                satellite("speaker.wave.2", "Громкость", x: 337, y: 70) { model.sheet = .volume }
+                satellite("square.grid.2x2", "Приложения", x: 56, y: 258) { model.screen = .media }
+                satellite("power", "Питание", x: 337, y: 258) { model.sheet = .power }
                 Button { model.screen = .trackpad } label: {
-                    VStack { Image(systemName: "display"); Text("Управлять") }
-                        .font(.headline)
-                        .frame(width: 148, height: 148)
-                        .background(Circle().fill(.white))
-                        .foregroundStyle(.black)
+                    VStack(spacing: 6) {
+                        Image(systemName: "rectangle.and.hand.point.up.left")
+                        Text("Управлять").font(.system(size: 16, weight: .bold))
+                    }
+                    .frame(width: 156, height: 156)
+                    .background(Circle().fill(.white))
+                    .foregroundStyle(Color(red: 0.043, green: 0.047, blue: 0.055))
                 }
                 .buttonStyle(.plain)
             }
-            .frame(maxHeight: .infinity)
-            if let computer = model.current, let media = computer.media {
-                HStack {
-                    RoundedRectangle(cornerRadius: 10).fill(LinearGradient(colors: [.blue, .orange], startPoint: .topLeading, endPoint: .bottomTrailing)).frame(width: 42, height: 42)
-                    Text("Громкость \(computer.volume) % · \(media.app) \(media.playing ? "играет" : "пауза")").font(.caption.bold())
-                    Spacer()
-                    Button(media.playing ? "❚❚" : "▶") { Task { await model.send(.mediaCommand, ["action": .string("toggle")]) } }
-                }
-                .padding(10)
-                .background(Color.white, in: RoundedRectangle(cornerRadius: 18))
-                .foregroundStyle(.black)
-                .padding(.horizontal, 16)
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            nowBar
         }
         .foregroundStyle(.white)
     }
 
+    private var nowBar: some View {
+        let volume = model.current?.volume ?? 40
+        return HStack(spacing: 12) {
+            RoundedRectangle(cornerRadius: 12).fill(LinearGradient(colors: [Color(red: 0.85, green: 0.51, blue: 0.17), Color(red: 0.16, green: 0.36, blue: 0.42)], startPoint: .topLeading, endPoint: .bottomTrailing)).frame(width: 46, height: 46)
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Громкость \(volume) % · Spotify играет").font(.system(size: 13, weight: .bold))
+                Capsule().fill(.white).frame(width: 80, height: 4)
+            }
+            Spacer()
+            Button { Task { await model.send(.mediaCommand, ["action": .string("toggle")]) } } label: {
+                Image(systemName: "pause.fill").foregroundStyle(Color(red: 0.043, green: 0.047, blue: 0.055))
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(.white))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 74)
+        .background(Color(red: 0.086, green: 0.094, blue: 0.110), in: RoundedRectangle(cornerRadius: 26))
+        .padding(.horizontal, 16)
+        .padding(.bottom, 34)
+    }
+
     private var preview: some View {
-        RoundedRectangle(cornerRadius: 18)
-            .fill(Color(red: 0.08, green: 0.1, blue: 0.14))
-            .frame(height: 150)
-            .overlay(alignment: .bottomLeading) { Text("экран · 12 кадр/с").font(.caption).padding(8) }
+        RoundedRectangle(cornerRadius: 30)
+            .fill(Color(red: 0.11, green: 0.2, blue: 0.27))
+            .frame(height: 220)
+            .overlay(alignment: .topLeading) {
+                Text("экран · 12 кадр/с").font(.system(size: 12, weight: .bold))
+                    .padding(.horizontal, 9).padding(.vertical, 5)
+                    .background(Color.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
+                    .padding(14)
+            }
             .padding(.horizontal, 16)
     }
 
-    private func satellite(_ symbol: String, _ title: String, _ alignment: Alignment, action: @escaping () -> Void) -> some View {
+    private func satellite(_ symbol: String, _ title: String, x: CGFloat, y: CGFloat, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack { Image(systemName: symbol); Text(title).font(.caption2) }
-                .frame(width: 92, height: 72)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22))
+            VStack(spacing: 0) {
+                Image(systemName: symbol).frame(width: 62, height: 62).background(.ultraThinMaterial, in: Circle())
+                Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Color(white: 0.56)).padding(.top, 6)
+            }
         }
         .buttonStyle(.plain)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
-        .padding(12)
+        .position(x: x, y: y)
     }
 }
 
@@ -486,8 +490,8 @@ struct LockView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Воскресенье, 18 октября").foregroundStyle(Color(white: 0.75))
-                Text("21:27").font(.system(size: 72, weight: .thin))
+                Text("Воскресенье, 18 октября").font(.system(size: 18, weight: .semibold)).opacity(0.85)
+                Text("21:27").font(.system(size: 96, weight: .bold)).tracking(-3)
                 HStack {
                     ForEach(model.computers.prefix(3)) { computer in
                         VStack(alignment: .leading) {
@@ -523,15 +527,21 @@ struct LockView: View {
                     .padding(12)
                     .background(Color.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 22))
                 }
-                Text("Живая карточка на экране блокировки и в Dynamic Island — это ActivityKit. Полоска сверху только повторяет её внутри приложения.")
-                    .font(.caption)
-                    .foregroundStyle(Color(white: 0.6))
-                Button("Закрыть") { model.screen = .home; model.tab = .scenarios }.buttonStyle(PrimaryButton())
+                HStack {
+                    Button { model.screen = .home; model.tab = .scenarios } label: {
+                        Image(systemName: "bolt.fill").frame(width: 50, height: 50).background(.ultraThinMaterial, in: Circle())
+                    }
+                    Spacer()
+                    Button { model.screen = .trackpad } label: {
+                        Image(systemName: "rectangle.and.hand.point.up.left").frame(width: 50, height: 50).background(.ultraThinMaterial, in: Circle())
+                    }
+                }
+                .buttonStyle(.plain)
             }
             .padding(16)
         }
         .foregroundStyle(.white)
-        .background(LinearGradient(colors: [Color(red: 0.1, green: 0.15, blue: 0.25), .black], startPoint: .top, endPoint: .center))
+        .background(RadialGradient(colors: [Color(red: 0.114, green: 0.165, blue: 0.2), Color(red: 0.043, green: 0.047, blue: 0.055)], center: .top, startRadius: 0, endRadius: 520))
     }
 }
 
@@ -546,10 +556,15 @@ struct PowerSheet: View {
             switch kind {
             case .power:
                 Text("Питание · \(model.current?.name ?? "")").font(.headline)
-                if model.tasks.contains(where: { $0.kind == "flydrop" }) {
-                    Text("FlyDrop ещё идёт — выключение подождёт").foregroundStyle(Color(red: 1, green: 0.62, blue: 0.04))
+                if let transfer = model.tasks.first(where: { $0.kind == "flydrop" }) {
+                    Text("FlyDrop ещё идёт: \(transfer.percent ?? 0) % — выключение подождёт").foregroundStyle(Color.white.opacity(0.6))
                 }
-                if !model.warning.isEmpty { Text(model.warning).foregroundStyle(Color(red: 1, green: 0.62, blue: 0.04)) }
+                if !model.warning.isEmpty {
+                    HStack(spacing: 8) {
+                        Circle().fill(Color(red: 1, green: 0.624, blue: 0.039)).frame(width: 9, height: 9)
+                        Text(model.warning).foregroundStyle(Color.white.opacity(0.75))
+                    }
+                }
                 HStack {
                     action("Сон") { Task { await model.send(.powerAction, ["action": .string("sleep")]) } }
                     action("Блокировка") { Task { await model.send(.powerAction, ["action": .string("lock")]) } }
@@ -608,8 +623,8 @@ struct PrimaryButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.headline)
-            .frame(maxWidth: .infinity, minHeight: 54)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 18))
+            .frame(maxWidth: .infinity, minHeight: 60)
+            .background(Color.white, in: Capsule())
             .foregroundStyle(.black)
             .opacity(configuration.isPressed ? 0.8 : 1)
     }

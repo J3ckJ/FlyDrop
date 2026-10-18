@@ -5,7 +5,17 @@ import path from 'node:path';
 import { createAgent } from '../src/agent.js';
 
 const outDir = path.resolve('pult/preview/shots');
-const shots = ['home', 'control', 'trackpad', 'drop', 'now', 'media', 'inbox', 'power', 'lock'];
+const shots = [
+  ['01', '01_home'],
+  ['02', '02_control'],
+  ['03', '03_trackpad'],
+  ['04', '04_flydrop_drag'],
+  ['05', '05_tasks'],
+  ['06', '06_media_apps'],
+  ['07', '07_inbox'],
+  ['08', '08_power'],
+  ['09', '09_live_activity'],
+];
 
 const dataDir = await mkdtemp(path.join(os.tmpdir(), 'pult-shots-'));
 const agent = await createAgent({ dataDir, platform: 'mock', name: 'Windows ПК', mockOs: 'windows', port: 0, advertise: false });
@@ -52,6 +62,14 @@ const attached = await call('Target.attachToTarget', { targetId: target.targetId
 const sessionId = attached.sessionId;
 await call('Page.enable', {}, sessionId);
 await call('Runtime.enable', {}, sessionId);
+await call('Emulation.setDeviceMetricsOverride', {
+  width: 393,
+  height: 852,
+  deviceScaleFactor: 2,
+  mobile: true,
+  screenWidth: 393,
+  screenHeight: 852,
+}, sessionId);
 await call('Runtime.setLifecycleEventsEnabled', { enabled: true }, sessionId).catch(() => {});
 
 async function waitFor(expression) {
@@ -60,29 +78,22 @@ async function waitFor(expression) {
     if (result.result?.value) return;
     await new Promise(resolve => setTimeout(resolve, 150));
   }
-  const html = await call('Runtime.evaluate', { expression: 'JSON.stringify({href: location.href, html: document.body ? document.body.innerHTML.slice(0, 500) : ""})', returnByValue: true }, sessionId);
+  const html = await call('Runtime.evaluate', { expression: 'JSON.stringify({href: location.href, text: document.body ? document.body.innerText.slice(0, 800) : ""})', returnByValue: true }, sessionId);
   console.error('PAGE STATE', html.result?.value);
   throw new Error(`Не дождались: ${expression}`);
 }
 
-async function openShot(name) {
-  await call('Page.navigate', { url: `https://127.0.0.1:${agent.port}/?shot=${name}` }, sessionId);
-  await waitFor('document.querySelector("[data-digit], .card, .orb, .lock, .cover, .clip, .pad, .sheet, .list")');
-  if (await call('Runtime.evaluate', { expression: 'Boolean(document.querySelector("[data-digit]"))', returnByValue: true }, sessionId).then(result => result.result.value)) {
-    const code = agent.pairingCode;
-    await call('Runtime.evaluate', {
-      expression: `(() => { const code = ${JSON.stringify(code)}; document.querySelectorAll('[data-digit]').forEach((input, index) => { input.value = code[index]; input.dispatchEvent(new Event('input', { bubbles: true })); }); return true; })()`,
-      returnByValue: true,
-    }, sessionId);
-    await waitFor('document.querySelector(".card, .orb, .lock, .cover, .clip, .pad, .sheet, .list")');
-  }
-  await new Promise(resolve => setTimeout(resolve, 350));
-  const shot = await call('Page.captureScreenshot', { format: 'png' }, sessionId);
+async function openShot(id, file) {
+  await call('Page.navigate', { url: `https://127.0.0.1:${agent.port}/?shot=${id}` }, sessionId);
+  await waitFor('document.body.dataset.ready==="1" && document.documentElement.classList.contains("shot")');
+  await call('Runtime.evaluate', { expression: 'document.fonts.ready', awaitPromise: true }, sessionId);
+  await new Promise(resolve => setTimeout(resolve, 250));
+  const shot = await call('Page.captureScreenshot', { format: 'png', fromSurface: true }, sessionId);
   await mkdir(outDir, { recursive: true });
-  await writeFile(path.join(outDir, `${name}.png`), Buffer.from(shot.data, 'base64'));
+  await writeFile(path.join(outDir, `${file}.png`), Buffer.from(shot.data, 'base64'));
 }
 
-for (const name of shots) await openShot(name);
+for (const [id, file] of shots) await openShot(id, file);
 
 async function evaluate(expression) {
   const result = await call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }, sessionId);
@@ -97,25 +108,32 @@ function expect(name, value) {
 }
 
 await call('Page.navigate', { url: `https://127.0.0.1:${agent.port}/` }, sessionId);
-await waitFor('document.querySelector(".card")');
+await waitFor('document.body.dataset.ready==="1"');
+if (await evaluate('Boolean(document.querySelector("[data-digit]"))')) {
+  const code = agent.pairingCode;
+  await evaluate(`(() => { const code = ${JSON.stringify(code)}; document.querySelectorAll('[data-digit]').forEach((input, index) => { input.value = code[index]; input.dispatchEvent(new Event('input', { bubbles: true })); }); return true; })()`);
+  await waitFor('document.querySelector(".card")');
+}
 const homeText = await evaluate('document.body.innerText');
 expect('главная: поиск', await evaluate('document.querySelector("#search")?.placeholder === "Поиск или команда"'));
 expect('главная: MacBook', homeText.includes('MacBook Pro'));
-expect('главная: Windows', homeText.includes('Windows'));
-expect('главная: mini', homeText.includes('mac-mini'));
+expect('главная: Windows', await evaluate('Boolean(document.querySelector(".card[data-id=self]"))'));
+expect('главная: mini', await evaluate('document.querySelector("#app").dataset.mini === "asleep"'));
 expect('главная: управлять', homeText.includes('Управлять'));
 expect('главная: задачи', homeText.includes('IMG_2041.jpg') && homeText.includes('Teardrop'));
+expect('нет нарисованных часов', !homeText.includes('9:41'));
 expect('лоток файла', await evaluate('Boolean(document.querySelector("[data-file]"))'));
 await evaluate(`(() => { const input = document.querySelector('#search'); input.value = 'разбудить'; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
-await waitFor('!document.body.innerText.includes("спит 3")');
-expect('команда разбудить', await evaluate('!document.body.innerText.includes("спит 3")'));
+await waitFor('document.querySelector("#app").dataset.mini === "online"');
+expect('команда разбудить', await evaluate('document.querySelector("#app").dataset.mini === "online"'));
 await evaluate(`(() => { const input = document.querySelector('#search'); input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
-await waitFor('document.body.innerText.includes("MacBook Pro") && document.body.innerText.includes("mac-mini")');
+await waitFor('Boolean(document.querySelector("[data-id=macbook]")) && Boolean(document.querySelector("[data-id=mini]"))');
 
+await evaluate('document.querySelector(".card[data-id=\\"self\\"]").click()');
+await waitFor('document.querySelector(".card[data-id=\\"self\\"] [data-action=control]")');
 await evaluate(`(() => {
   const chip = document.querySelector('[data-file]');
   const card = document.querySelector('.card[data-id="self"]');
-  card.scrollIntoView({ inline: 'center' });
   const from = chip.getBoundingClientRect();
   const to = card.getBoundingClientRect();
   const down = { bubbles: true, pointerId: 1, clientX: from.x + 8, clientY: from.y + 8 };
@@ -147,8 +165,9 @@ expect('тачпад: модификаторы', await evaluate('["Ctrl","Alt","
 await evaluate('document.querySelector("[data-mod=Ctrl]").click()');
 expect('тачпад: Ctrl включён', await evaluate('document.querySelector("[data-mod=Ctrl]").classList.contains("on")'));
 await evaluate('document.querySelector("[data-action=control]").click()');
+await waitFor('document.body.innerText.includes("Клавиатура") && document.body.innerText.includes("Управлять")');
 await evaluate('document.querySelector("[data-action=media]").click()');
-await waitFor('document.body.innerText.includes("Открыть на")');
+await waitFor('document.body.textContent.includes("Открыть на")');
 expect('медиа: Teardrop', await evaluate('document.body.innerText.includes("Teardrop")'));
 await evaluate('document.querySelector("[data-action=launch]").click()');
 await evaluate('document.querySelector("[data-action=control]").click()');
@@ -166,15 +185,19 @@ await evaluate('document.querySelector("[data-tab=scenarios]").click()');
 await waitFor('document.body.innerText.includes("Бэкап")');
 await evaluate('document.querySelector("[data-action=schedule]").click()');
 await evaluate('document.querySelector("[data-action=lock]").click()');
-await waitFor('document.body.innerText.includes("Держать на блокировке")');
-expect('блокировка: музыка и объяснение', await evaluate('document.body.innerText.includes("Teardrop") && document.body.innerText.includes("Dynamic Island")'));
+await waitFor('document.body.innerText.includes("21:27")');
+expect('блокировка: часы и музыка', await evaluate('document.body.innerText.includes("Teardrop") && document.body.innerText.includes("21:27") && document.body.innerText.includes("MacBook")'));
 await evaluate('document.querySelector("[data-action=hold-lock]").click()');
 await new Promise(resolve => setTimeout(resolve, 400));
 expect('media session', await evaluate('Boolean(navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.title)'));
+await evaluate('document.querySelector("[data-action=trackpad]").click()');
+await waitFor('document.body.innerText.includes("Ctrl")');
+await evaluate('document.querySelector("[data-action=control]").click()');
+await evaluate('document.querySelector("[data-action=home]").click()');
 await mkdir(outDir, { recursive: true });
 const walked = await call('Page.captureScreenshot', { format: 'png' }, sessionId);
 await writeFile(path.join(outDir, 'walk-lock.png'), Buffer.from(walked.data, 'base64'));
-await evaluate('document.querySelector("[data-action=scenarios]").click()');
+await evaluate('document.querySelector("[data-tab=scenarios]").click()');
 await waitFor('document.querySelector(".caps")');
 const caps = await evaluate('JSON.stringify(Object.fromEntries([...document.querySelectorAll(".caps li")].map(item => [item.querySelector("b")?.textContent, item.textContent])))');
 await writeFile(path.join(outDir, 'walk.json'), JSON.stringify({ checks, caps: caps ? JSON.parse(caps) : null }, null, 2));

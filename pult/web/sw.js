@@ -1,4 +1,4 @@
-const CACHE = 'pult-shell-v1';
+const CACHE = 'pult-shell-v2';
 const SHELL = ['/', '/app.js', '/net.js', '/experiments.js', '/zip.js', '/style.css', '/manifest.webmanifest', '/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png'];
 
 self.addEventListener('install', event => {
