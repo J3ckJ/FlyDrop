@@ -1,0 +1,92 @@
+{
+  "checks": [
+    {
+      "name": "главная: поиск",
+      "ok": true
+    },
+    {
+      "name": "главная: MacBook",
+      "ok": true
+    },
+    {
+      "name": "главная: Windows",
+      "ok": true
+    },
+    {
+      "name": "главная: mini",
+      "ok": true
+    },
+    {
+      "name": "главная: управлять",
+      "ok": true
+    },
+    {
+      "name": "главная: задачи",
+      "ok": true
+    },
+    {
+      "name": "нет нарисованных часов",
+      "ok": true
+    },
+    {
+      "name": "лоток файла",
+      "ok": true
+    },
+    {
+      "name": "команда разбудить",
+      "ok": true
+    },
+    {
+      "name": "перетаскивание подсвечивает Windows",
+      "ok": true
+    },
+    {
+      "name": "передача дошла или показала ошибку",
+      "ok": true
+    },
+    {
+      "name": "управление: спутники",
+      "ok": true
+    },
+    {
+      "name": "тачпад: модификаторы",
+      "ok": true
+    },
+    {
+      "name": "тачпад: Ctrl включён",
+      "ok": true
+    },
+    {
+      "name": "медиа: Teardrop",
+      "ok": true
+    },
+    {
+      "name": "питание: сон и удержание",
+      "ok": true
+    },
+    {
+      "name": "входящие: буфер",
+      "ok": true
+    },
+    {
+      "name": "блокировка: часы и музыка",
+      "ok": true
+    },
+    {
+      "name": "media session",
+      "ok": true
+    }
+  ],
+  "caps": {
+    "serviceWorker": "serviceWorker — зарегистрирован",
+    "push": "push — API есть, на iPhone только с экрана Домой",
+    "badge": "badge — значок 6",
+    "wakeLock": "wakeLock — экран не гаснет, пока Пульт открыт",
+    "mediaSession": "mediaSession — играет тишина, карточка может быть на блокировке",
+    "backgroundSync": "backgroundSync — API есть",
+    "localNotification": "localNotification — нет разрешения или API",
+    "shareTarget": "shareTarget — только если система отдаёт файлы установленному приложению",
+    "fileInput": "fileInput — есть",
+    "standalone": "standalone — false"
+  }
+}

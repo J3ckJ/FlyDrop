@@ -1,0 +1,4 @@
+agent/node_modules
+protocol/.build
+dist/
+*.exe

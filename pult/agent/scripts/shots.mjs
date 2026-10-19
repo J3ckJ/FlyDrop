@@ -1,0 +1,210 @@
+import { spawn } from 'node:child_process';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { createAgent } from '../src/agent.js';
+
+const outDir = path.resolve('pult/preview/shots');
+const shots = [
+  ['01', '01_home'],
+  ['02', '02_control'],
+  ['03', '03_trackpad'],
+  ['04', '04_flydrop_drag'],
+  ['05', '05_tasks'],
+  ['06', '06_media_apps'],
+  ['07', '07_inbox'],
+  ['08', '08_power'],
+  ['09', '09_live_activity'],
+];
+
+const dataDir = await mkdtemp(path.join(os.tmpdir(), 'pult-shots-'));
+const agent = await createAgent({ dataDir, platform: 'mock', name: 'Windows ПК', mockOs: 'windows', port: 0, advertise: false });
+const userData = await mkdtemp(path.join(os.tmpdir(), 'pult-chrome-'));
+const chrome = spawn('google-chrome', [
+  '--headless=new', '--disable-gpu', '--no-sandbox', '--ignore-certificate-errors',
+  '--remote-debugging-port=9333', `--user-data-dir=${userData}`, '--window-size=900,980',
+  '--autoplay-policy=no-user-gesture-required', 'about:blank',
+], { stdio: 'ignore' });
+
+async function cdp() {
+  for (let i = 0; i < 40; i++) {
+    try {
+      const list = await fetch('http://127.0.0.1:9333/json/version');
+      if (list.ok) return list.json();
+    } catch { /* chrome is still starting */ }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error('Chrome не открыл отладку');
+}
+
+const version = await cdp();
+const socket = new WebSocket(version.webSocketDebuggerUrl);
+await new Promise(resolve => socket.addEventListener('open', resolve, { once: true }));
+let seq = 0;
+const pending = new Map();
+socket.addEventListener('message', event => {
+  const message = JSON.parse(event.data);
+  if (message.method === 'Runtime.exceptionThrown') console.error('PAGE', message.params.exceptionDetails?.exception?.description || message.params.exceptionDetails?.text);
+  if (message.method === 'Runtime.consoleAPICalled') {
+    const text = (message.params.args || []).map(item => item.value || item.description || '').join(' ');
+    if (text) console.error('CONSOLE', text);
+  }
+  const waiter = pending.get(message.id);
+  if (waiter) { pending.delete(message.id); waiter(message.result); }
+});
+function call(method, params = {}, sessionId) {
+  const id = ++seq;
+  socket.send(JSON.stringify({ id, method, params, sessionId }));
+  return new Promise(resolve => pending.set(id, resolve));
+}
+const target = await call('Target.createTarget', { url: 'about:blank' });
+const attached = await call('Target.attachToTarget', { targetId: target.targetId, flatten: true });
+const sessionId = attached.sessionId;
+await call('Page.enable', {}, sessionId);
+await call('Runtime.enable', {}, sessionId);
+await call('Emulation.setDeviceMetricsOverride', {
+  width: 393,
+  height: 852,
+  deviceScaleFactor: 2,
+  mobile: true,
+  screenWidth: 393,
+  screenHeight: 852,
+}, sessionId);
+await call('Runtime.setLifecycleEventsEnabled', { enabled: true }, sessionId).catch(() => {});
+
+async function waitFor(expression) {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const result = await call('Runtime.evaluate', { expression, returnByValue: true }, sessionId);
+    if (result.result?.value) return;
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
+  const html = await call('Runtime.evaluate', { expression: 'JSON.stringify({href: location.href, text: document.body ? document.body.innerText.slice(0, 800) : ""})', returnByValue: true }, sessionId);
+  console.error('PAGE STATE', html.result?.value);
+  throw new Error(`Не дождались: ${expression}`);
+}
+
+async function openShot(id, file) {
+  await call('Page.navigate', { url: `https://127.0.0.1:${agent.port}/?shot=${id}` }, sessionId);
+  await waitFor('document.body.dataset.ready==="1" && document.documentElement.classList.contains("shot")');
+  await call('Runtime.evaluate', { expression: 'document.fonts.ready', awaitPromise: true }, sessionId);
+  await new Promise(resolve => setTimeout(resolve, 250));
+  const shot = await call('Page.captureScreenshot', { format: 'png', fromSurface: true }, sessionId);
+  await mkdir(outDir, { recursive: true });
+  await writeFile(path.join(outDir, `${file}.png`), Buffer.from(shot.data, 'base64'));
+}
+
+for (const [id, file] of shots) await openShot(id, file);
+
+async function evaluate(expression) {
+  const result = await call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }, sessionId);
+  if (result.exceptionDetails) throw new Error(result.exceptionDetails.text || 'Ошибка страницы');
+  return result.result?.value;
+}
+
+const checks = [];
+function expect(name, value) {
+  checks.push({ name, ok: Boolean(value) });
+  if (!value) throw new Error(`Проверка не прошла: ${name}`);
+}
+
+await call('Page.navigate', { url: `https://127.0.0.1:${agent.port}/` }, sessionId);
+await waitFor('document.body.dataset.ready==="1"');
+if (await evaluate('Boolean(document.querySelector("[data-digit]"))')) {
+  const code = agent.pairingCode;
+  await evaluate(`(() => { const code = ${JSON.stringify(code)}; document.querySelectorAll('[data-digit]').forEach((input, index) => { input.value = code[index]; input.dispatchEvent(new Event('input', { bubbles: true })); }); return true; })()`);
+  await waitFor('document.querySelector(".card")');
+}
+const homeText = await evaluate('document.body.innerText');
+expect('главная: поиск', await evaluate('document.querySelector("#search")?.placeholder === "Поиск или команда"'));
+expect('главная: MacBook', homeText.includes('MacBook Pro'));
+expect('главная: Windows', await evaluate('Boolean(document.querySelector(".card[data-id=self]"))'));
+expect('главная: mini', await evaluate('document.querySelector("#app").dataset.mini === "asleep"'));
+expect('главная: управлять', homeText.includes('Управлять'));
+expect('главная: задачи', homeText.includes('IMG_2041.jpg') && homeText.includes('Teardrop'));
+expect('нет нарисованных часов', !homeText.includes('9:41'));
+expect('лоток файла', await evaluate('Boolean(document.querySelector("[data-file]"))'));
+await evaluate(`(() => { const input = document.querySelector('#search'); input.value = 'разбудить'; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+await waitFor('document.querySelector("#app").dataset.mini === "online"');
+expect('команда разбудить', await evaluate('document.querySelector("#app").dataset.mini === "online"'));
+await evaluate(`(() => { const input = document.querySelector('#search'); input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+await waitFor('Boolean(document.querySelector("[data-id=macbook]")) && Boolean(document.querySelector("[data-id=mini]"))');
+
+await evaluate('document.querySelector(".card[data-id=\\"self\\"]").click()');
+await waitFor('document.querySelector(".card[data-id=\\"self\\"] [data-action=control]")');
+await evaluate(`(() => {
+  const chip = document.querySelector('[data-file]');
+  const card = document.querySelector('.card[data-id="self"]');
+  const from = chip.getBoundingClientRect();
+  const to = card.getBoundingClientRect();
+  const down = { bubbles: true, pointerId: 1, clientX: from.x + 8, clientY: from.y + 8 };
+  chip.dispatchEvent(new PointerEvent('pointerdown', down));
+  chip.dispatchEvent(new PointerEvent('pointermove', { ...down, clientX: to.x + 30, clientY: to.y + 40 }));
+  return document.querySelector('.card.hot')?.dataset.id || '';
+})()`);
+expect('перетаскивание подсвечивает Windows', await evaluate('document.querySelector(".card.hot")?.dataset.id === "self"'));
+await evaluate(`(() => {
+  const chip = document.querySelector('[data-file]');
+  const card = document.querySelector('.card[data-id="self"]');
+  const to = card.getBoundingClientRect();
+  chip.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1, clientX: to.x + 30, clientY: to.y + 40 }));
+  return true;
+})()`);
+await evaluate('document.querySelector("[data-tab=inbox]").click()');
+await waitFor('document.body.innerText.includes("файл получен") || document.body.innerText.includes("Передача не удалась")');
+expect('передача дошла или показала ошибку', await evaluate('document.body.innerText.includes("файл получен") || document.body.innerText.includes("Передача не удалась")'));
+await evaluate('document.querySelector("[data-tab=computers]").click()');
+await waitFor('document.querySelector(".card[data-id=\\"self\\"] [data-action=control]")');
+
+await evaluate('document.querySelector(".card[data-id=\\"self\\"] [data-action=control]").click()');
+await waitFor('document.body.innerText.includes("Клавиатура")');
+const controlText = await evaluate('document.body.innerText');
+expect('управление: спутники', ['Клавиатура', 'Громкость', 'Приложения', 'Питание', 'экран · 12 кадр/с'].every(part => controlText.includes(part)));
+await evaluate('document.querySelector("[data-action=trackpad]").click()');
+await waitFor('document.body.innerText.includes("Ctrl")');
+expect('тачпад: модификаторы', await evaluate('["Ctrl","Alt","Win","Tab","Esc"].every(key => document.body.innerText.includes(key))'));
+await evaluate('document.querySelector("[data-mod=Ctrl]").click()');
+expect('тачпад: Ctrl включён', await evaluate('document.querySelector("[data-mod=Ctrl]").classList.contains("on")'));
+await evaluate('document.querySelector("[data-action=control]").click()');
+await waitFor('document.body.innerText.includes("Клавиатура") && document.body.innerText.includes("Управлять")');
+await evaluate('document.querySelector("[data-action=media]").click()');
+await waitFor('document.body.textContent.includes("Открыть на")');
+expect('медиа: Teardrop', await evaluate('document.body.innerText.includes("Teardrop")'));
+await evaluate('document.querySelector("[data-action=launch]").click()');
+await evaluate('document.querySelector("[data-action=control]").click()');
+await waitFor('document.body.innerText.includes("Питание")');
+await evaluate('document.querySelector("[data-action=power]").click()');
+await waitFor('document.body.innerText.includes("Удерживайте")');
+const powerText = await evaluate('document.body.innerText');
+expect('питание: сон и удержание', powerText.includes('Сон') && powerText.includes('Блокировка') && powerText.includes('Перезагрузка') && powerText.includes('Удерживайте'));
+await evaluate('document.querySelector("[data-action=home]").click()');
+await waitFor('document.querySelector("[data-tab=inbox]")');
+await evaluate('document.querySelector("[data-tab=inbox]").click()');
+await waitFor('document.body.innerText.includes("Вставить на iPhone")');
+expect('входящие: буфер', await evaluate('document.body.innerText.includes("ssh://git@mac-mini.local")'));
+await evaluate('document.querySelector("[data-tab=scenarios]").click()');
+await waitFor('document.body.innerText.includes("Бэкап")');
+await evaluate('document.querySelector("[data-action=schedule]").click()');
+await evaluate('document.querySelector("[data-action=lock]").click()');
+await waitFor('document.body.innerText.includes("21:27")');
+expect('блокировка: часы и музыка', await evaluate('document.body.innerText.includes("Teardrop") && document.body.innerText.includes("21:27") && document.body.innerText.includes("MacBook")'));
+await evaluate('document.querySelector("[data-action=hold-lock]").click()');
+await new Promise(resolve => setTimeout(resolve, 400));
+expect('media session', await evaluate('Boolean(navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.title)'));
+await evaluate('document.querySelector("[data-action=trackpad]").click()');
+await waitFor('document.body.innerText.includes("Ctrl")');
+await evaluate('document.querySelector("[data-action=control]").click()');
+await evaluate('document.querySelector("[data-action=home]").click()');
+await mkdir(outDir, { recursive: true });
+const walked = await call('Page.captureScreenshot', { format: 'png' }, sessionId);
+await writeFile(path.join(outDir, 'walk-lock.png'), Buffer.from(walked.data, 'base64'));
+await evaluate('document.querySelector("[data-tab=scenarios]").click()');
+await waitFor('document.querySelector(".caps")');
+const caps = await evaluate('JSON.stringify(Object.fromEntries([...document.querySelectorAll(".caps li")].map(item => [item.querySelector("b")?.textContent, item.textContent])))');
+await writeFile(path.join(outDir, 'walk.json'), JSON.stringify({ checks, caps: caps ? JSON.parse(caps) : null }, null, 2));
+console.log(outDir);
+console.log(checks.map(item => item.name).join('\n'));
+console.log(caps);
+chrome.kill();
+await agent.close();
+await rm(dataDir, { recursive: true, force: true });
+await rm(userData, { recursive: true, force: true });

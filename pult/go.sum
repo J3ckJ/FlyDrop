@@ -1,0 +1,17 @@
+github.com/go-appdirs/outdir v0.2.0 h1:1TdK1U7d0kaHMIYp3BJkrVJwLxBJtxiDB1eOMTdi0As=
+github.com/go-appdirs/outdir v0.2.0/go.mod h1:A/F6uTrvD3bMiof2UXK5FUNemDN1tC7vOZxi8LdrhJs=
+github.com/go-mswin/screencapture v0.4.0 h1:1h4+wZXhk8A4ddoLGudkI73fJuBMfaTVlWlNrm99DW4=
+github.com/go-mswin/screencapture v0.4.0/go.mod h1:CgqBbBrGyUwuS/rmvncuRVaybGFuLFMZfOqxlxdZ9bQ=
+github.com/go-mswin/win32 v0.5.0 h1:QQGNJAR7IG5DZ/ZlQ9ASSl07pJN85xNzp/RIfA+f7Yk=
+github.com/go-mswin/win32 v0.5.0/go.mod h1:tCVmiQ+p8Y9xa+aCKRxGtuMFNG6vaHvZ5LXbNAahzNs=
+github.com/go-ole/go-ole v1.3.0 h1:Dt6ye7+vXGIKZ7Xtk4s6/xVdGDQynvom7xCFEdWr6uE=
+github.com/go-ole/go-ole v1.3.0/go.mod h1:5LS6F96DhAwUc7C+1HLexzMXY1xGRSryjyPPKW6zv78=
+github.com/mdp/qrterminal/v3 v3.2.1 h1:6+yQjiiOsSuXT5n9/m60E54vdgFsw0zhADHhHLrFet4=
+github.com/mdp/qrterminal/v3 v3.2.1/go.mod h1:jOTmXvnBsMy5xqLniO0R++Jmjs2sTm9dFSuQ5kpz/SU=
+golang.org/x/sys v0.1.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+golang.org/x/sys v0.48.0 h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo=
+golang.org/x/sys v0.48.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
+golang.org/x/term v0.13.0 h1:bb+I9cTfFazGW51MZqBVmZy7+JEJMouUHTUSKVQLBek=
+golang.org/x/term v0.13.0/go.mod h1:LTmsnFJwVN6bCy1rVCoS+qHT1HhALEFxKncY3WNNh4U=
+rsc.io/qr v0.2.0 h1:6vBLea5/NRMVTz8V66gipeLycZMl/+UlFmk8DvqQ6WY=
+rsc.io/qr v0.2.0/go.mod h1:IF+uZjkb9fqyeF/4tlBoynqmQxUoPfWEKh921coOuXs=
