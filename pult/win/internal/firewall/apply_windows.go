@@ -3,6 +3,8 @@
 package firewall
 
 import (
+	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -11,7 +13,20 @@ import (
 )
 
 // Apply adds an inbound TCP rule for the private profile through the documented firewall COM API.
-func Apply(ports ...int) (bool, []string) {
+// COM stays on one OS thread. A failure or a panic is returned as a note and does not stop Пульт.
+func Apply(ports ...int) (ok bool, notes []string) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			ok = false
+			notes = []string{fmt.Sprintf("Брандмауэр Windows вызвал сбой и пропущен: %v", recovered)}
+		}
+	}()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	return apply(ports...)
+}
+
+func apply(ports ...int) (bool, []string) {
 	list := make([]string, 0, len(ports))
 	for _, port := range ports {
 		if port > 0 && port < 65536 {
@@ -23,7 +38,7 @@ func Apply(ports ...int) (bool, []string) {
 	}
 	portList := strings.Join(list, ",")
 	if err := ole.CoInitializeEx(0, ole.COINIT_MULTITHREADED); err != nil {
-		return false, []string{"Брандмауэр Windows недоступен. Если iPhone не открывается, запустите pult.exe от администратора один раз."}
+		return false, []string{fmt.Sprintf("Брандмауэр Windows пропущен: %v. Пульт продолжает работу. Защиту антивируса не отключайте.", err)}
 	}
 	defer ole.CoUninitialize()
 	unknown, err := oleutil.CreateObject("HNetCfg.FwPolicy2")
@@ -47,10 +62,14 @@ func Apply(ports ...int) (bool, []string) {
 		return false, []string{decision.Reason}
 	}
 	rulesValue, err := oleutil.GetProperty(policy, "Rules")
-	if err != nil {
+	if err != nil || rulesValue == nil {
 		return false, []string{adminHint()}
 	}
 	rules := rulesValue.ToIDispatch()
+	if rules == nil {
+		rulesValue.Clear()
+		return false, []string{"Брандмауэр вернул пустой список правил. Правило пропущено, Пульт продолжает работу."}
+	}
 	defer rules.Release()
 	_, _ = oleutil.CallMethod(rules, "Remove", "Pult")
 	ruleUnknown, err := oleutil.CreateObject("HNetCfg.FWRule")

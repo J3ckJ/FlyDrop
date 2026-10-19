@@ -4,6 +4,7 @@ package desktop
 
 import (
 	"errors"
+	"runtime"
 	"syscall"
 	"unsafe"
 
@@ -124,6 +125,8 @@ func endpointVolume() (uintptr, func(), error) {
 }
 
 func withCOM(fn func() error) error {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	hr, _, _ := procCoInitializeEx.Call(0, 0)
 	if failed(hr) && uint32(hr) != 0x80010106 {
 		return errors.New("Громкость недоступна")

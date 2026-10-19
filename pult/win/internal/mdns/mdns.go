@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -72,6 +73,11 @@ func BuildAnnouncement(instance, host string, port int, addresses []string, txt 
 // Advertise repeats the packet until ctx ends. A failure to bind is not fatal for the phone,
 // which can still type the address printed in the console.
 func Advertise(ctx context.Context, packet []byte) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			fmt.Fprintf(os.Stderr, "Объявление в локальной сети остановилось: %v\n", recovered)
+		}
+	}()
 	if len(packet) == 0 {
 		return
 	}
@@ -110,6 +116,22 @@ func Advertise(ctx context.Context, packet []byte) {
 			_, _ = conn.WriteToUDP(packet, &net.UDPAddr{IP: net.ParseIP("224.0.0.251"), Port: 5353})
 		}
 	}
+}
+
+// Probe tries the mDNS socket and closes it. A failure is not fatal:
+// corporate Wi-Fi often blocks multicast, and the phone can type the address.
+func Probe() error {
+	target := &net.UDPAddr{IP: net.ParseIP("224.0.0.251"), Port: 5353}
+	conn, err := net.ListenMulticastUDP("udp4", nil, target)
+	if err == nil {
+		return conn.Close()
+	}
+	dialed, dialErr := net.DialUDP("udp4", nil, target)
+	if dialErr == nil {
+		_ = dialed.Close()
+		return fmt.Errorf("Multicast mDNS не открылся (%v). Исходящий UDP к 224.0.0.251:5353 доступен. Изоляция Wi-Fi и сетевой экран входящие этим не открывают.", err)
+	}
+	return fmt.Errorf("Объявление mDNS недоступно (%v; %v). iPhone открывает адрес из консоли вручную.", err, dialErr)
 }
 
 func record(name string, kind uint16, data []byte) ([]byte, error) {

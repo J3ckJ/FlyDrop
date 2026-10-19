@@ -2,54 +2,101 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 
 	qrterminal "github.com/mdp/qrterminal/v3"
 
 	"github.com/J3ckJ/FlyDrop/pult/win/internal/agent"
+	"github.com/J3ckJ/FlyDrop/pult/win/internal/bootlog"
 	"github.com/J3ckJ/FlyDrop/pult/win/internal/cert"
+	"github.com/J3ckJ/FlyDrop/pult/win/internal/console"
 	"github.com/J3ckJ/FlyDrop/pult/win/internal/diag"
 	"github.com/J3ckJ/FlyDrop/pult/win/internal/firewall"
 	"github.com/J3ckJ/FlyDrop/pult/win/internal/lan"
 	"github.com/J3ckJ/FlyDrop/pult/win/internal/mdns"
+	"github.com/J3ckJ/FlyDrop/pult/win/internal/paths"
 	"github.com/J3ckJ/FlyDrop/pult/win/internal/store"
 	"github.com/J3ckJ/FlyDrop/pult/win/internal/ui"
 )
 
 func main() {
-	portFlag := flag.Int("port", 4720, "порт HTTPS")
-	nameFlag := flag.String("name", "", "имя компьютера")
-	dataFlag := flag.String("data", "", "каталог данных")
-	noFirewall := flag.Bool("no-firewall", false, "не менять брандмауэр")
-	noMDNS := flag.Bool("no-mdns", false, "не объявлять компьютер в локальной сети")
-	revoke := flag.String("revoke", "", "снять сопряжение телефона")
-	flag.Parse()
+	var code int
+	var selftest bool
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			bootlog.Panic(recovered)
+			code = 1
+		}
+		bootlog.Close()
+		if console.ShouldPause(selftest, console.Own()) {
+			console.Pause()
+		}
+		if code != 0 {
+			os.Exit(code)
+		}
+	}()
+	bootlog.Open()
+	code = run(&selftest)
+}
 
-	dir := *dataFlag
-	if dir == "" {
-		dir = dataDir()
+func run(selftest *bool) int {
+	fs := flag.NewFlagSet("pult", flag.ContinueOnError)
+	fs.SetOutput(os.Stdout)
+	portFlag := fs.Int("port", 4720, "порт HTTPS")
+	nameFlag := fs.String("name", "", "имя компьютера")
+	dataFlag := fs.String("data", "", "каталог данных")
+	noFirewall := fs.Bool("no-firewall", false, "не менять брандмауэр")
+	noMDNS := fs.Bool("no-mdns", false, "не объявлять компьютер в локальной сети")
+	revoke := fs.String("revoke", "", "снять сопряжение телефона")
+	selftestFlag := fs.Bool("selftest", false, "проверка запуска: сертификат, порты 4720 и 4721, брандмауэр, трей, экран, mDNS")
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, "Не удалось разобрать параметры.")
+		return 2
 	}
+	*selftest = *selftestFlag
+	where := bootlog.Paths()
+	if len(where) > 0 {
+		fmt.Printf("Журнал: %s\n", strings.Join(where, " и "))
+	}
+	if *selftestFlag {
+		return runSelftest(*dataFlag)
+	}
+	bootlog.Stage("каталог данных")
+	dir, notes, err := paths.Choose(*dataFlag)
+	for _, note := range notes {
+		bootlog.Printf("%s", note)
+		fmt.Println(note)
+	}
+	if err != nil {
+		return fail(err)
+	}
+	bootlog.Printf("данные: %s", dir)
+	fmt.Printf("Данные: %s\n", dir)
+	bootlog.Stage("хранилище телефонов")
 	phones, err := store.Open(dir)
 	if err != nil {
-		exit(err)
+		return fail(fmt.Errorf("Не удалось открыть список телефонов: %w", err))
 	}
 	if *revoke != "" {
+		bootlog.Stage("снятие сопряжения")
 		removed, err := phones.Revoke(*revoke)
 		if err != nil {
-			exit(err)
+			return fail(err)
 		}
 		if removed {
 			fmt.Println("Телефон удалён из сопряжённых.")
 		} else {
 			fmt.Println("Такого телефона нет.")
 		}
-		return
+		return 0
 	}
 	name := strings.TrimSpace(*nameFlag)
 	if name == "" {
@@ -58,18 +105,22 @@ func main() {
 	if name == "" {
 		name = "Pult"
 	}
+	bootlog.Stage("адаптеры")
 	phone, skipped, mac, err := lan.Interfaces()
 	if err != nil {
+		bootlog.Printf("адаптеры: %v", err)
 		fmt.Println("  Список адаптеров недоступен:", err)
 	}
 	addresses := []string{"127.0.0.1"}
 	for _, adapter := range phone {
 		addresses = append(addresses, adapter.Address)
 	}
+	bootlog.Stage("сертификат")
 	material, err := cert.Load(dir, addresses)
 	if err != nil {
-		exit(err)
+		return fail(fmt.Errorf("Не удалось записать сертификат в %s: %w", dir, err))
 	}
+	bootlog.Printf("отпечаток: %s", material.Fingerprint)
 	downloads := downloadDir()
 	server := agent.New(openDesktop(), phones)
 	server.Name = name
@@ -79,55 +130,151 @@ func main() {
 	server.HostID = phones.HostID()
 	server.CA = material.CADer
 	server.Fingerprint = material.Fingerprint
-	presence := ui.Start()
+	bootlog.Stage("привязка 0.0.0.0")
+	serveErrors := startServer(server, material, *portFlag)
+	if err := waitListen(server, serveErrors); err != nil {
+		return fail(err)
+	}
+	bootlog.Printf("слушает %s и %s", server.Bound(), server.PlainBound())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	printConsole(server, phone, skipped, material.Fingerprint)
+	bootlog.Stage("брандмауэр")
+	firewallNotes := []string{"Проверка брандмауэра выключена (--no-firewall)."}
+	if !*noFirewall {
+		firewallNotes = applyFirewall(server.Port(), server.HTTPPort())
+	}
+	for _, note := range firewallNotes {
+		bootlog.Printf("брандмауэр: %s", note)
+	}
+	report(server, phone, firewallNotes)
+	go watchNetwork(ctx, server, *noFirewall)
+	bootlog.Stage("mDNS")
+	if *noMDNS {
+		bootlog.Printf("mDNS выключен параметром")
+	} else if err := announce(ctx, server, phones, phone, material.Fingerprint); err != nil {
+		bootlog.Printf("mDNS: %v", err)
+		fmt.Println(" ", err)
+		fmt.Println("  iPhone может открыть адрес из этого окна вручную. Объявление в сети для этого не нужно.")
+	}
+	bootlog.Stage("трей")
+	presence, err := ui.Start()
+	if err != nil {
+		bootlog.Printf("трей: %v", err)
+		fmt.Println(" ", err)
+		presence = nil
+	}
 	server.OnPresence = func(connected bool) { presence.Set(connected) }
-	errors := make(chan error, 1)
-	go func() { errors <- server.Serve(material, *portFlag) }()
+	bootlog.Stage("готов, ожидание телефона")
+	fmt.Println("  Телефон вводит этот код. Без кода управление недоступно.")
+	fmt.Println("  Телефон и компьютер — в одной Wi-Fi.")
+	fmt.Println("  Закройте это окно или нажмите Ctrl+C, чтобы завершить Пульт.")
+	fmt.Println()
+	bootlog.Stage("экран откроется по запросу телефона, не при старте")
+	ui.Run(func() {
+		cancel()
+		_ = server.Close()
+	})
+	return 0
+}
+
+func startServer(server *agent.Server, material cert.Material, port int) <-chan error {
+	serveErrors := make(chan error, 1)
+	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				serveErrors <- fmt.Errorf("Сбой при запуске сервера: %v\n%s", recovered, debug.Stack())
+			}
+		}()
+		serveErrors <- server.Serve(material, port)
+	}()
+	return serveErrors
+}
+
+func waitListen(server *agent.Server, serveErrors <-chan error) error {
 	deadline := time.Now().Add(5 * time.Second)
-	for server.Port() == 0 && time.Now().Before(deadline) {
+	for (server.Port() == 0 || server.HTTPPort() == 0) && time.Now().Before(deadline) {
 		select {
-		case err := <-errors:
-			exit(err)
+		case err := <-serveErrors:
+			if err == nil {
+				return errors.New("Сервер остановился сразу после старта")
+			}
+			return err
 		default:
 			time.Sleep(20 * time.Millisecond)
 		}
 	}
 	if server.Port() == 0 || server.HTTPPort() == 0 {
-		exit(fmt.Errorf("Порт не открылся"))
+		return errors.New("Порт не открылся")
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	printConsole(server, phone, skipped, material.Fingerprint)
-	notes := []string{"Проверка брандмауэра выключена (--no-firewall)."}
-	if !*noFirewall {
-		_, notes = firewall.Apply(server.Port(), server.HTTPPort())
+	if !strings.Contains(server.Bound(), "0.0.0.0:") || !strings.Contains(server.PlainBound(), "0.0.0.0:") {
+		return fmt.Errorf("Сервер слушает %s и %s, а нужен адрес 0.0.0.0", server.Bound(), server.PlainBound())
 	}
-	report(server, phone, notes)
-	go watchNetwork(ctx, server, *noFirewall)
-	if !*noMDNS && len(phone) > 0 {
-		addresses := make([]string, 0, len(phone))
-		for _, adapter := range phone {
-			addresses = append(addresses, adapter.Address)
-		}
-		host := phones.HostID()
-		if len(host) > 8 {
-			host = host[:8]
-		}
-		packet, err := mdns.BuildAnnouncement(sanitize(name), host+".local", server.Port(), addresses, map[string]string{
-			"os": "windows", "ver": "1", "fp": fingerprintShort(material.Fingerprint), "fly": fmt.Sprint(server.Port()),
-		})
-		if err == nil {
-			go mdns.Advertise(ctx, packet)
-		}
+	return nil
+}
+
+func applyFirewall(ports ...int) []string {
+	type result struct {
+		notes []string
 	}
-	fmt.Println("  Телефон вводит этот код. Без кода управление недоступно.")
-	fmt.Println("  Телефон и компьютер — в одной Wi-Fi.")
-	fmt.Println("  Закройте это окно или нажмите Ctrl+C, чтобы завершить Пульт.")
-	fmt.Println()
-	ui.Run(func() {
-		cancel()
-		_ = server.Close()
+	done := make(chan result, 1)
+	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				done <- result{notes: []string{fmt.Sprintf("Брандмауэр Windows вызвал сбой и пропущен: %v", recovered)}}
+			}
+		}()
+		_, notes := firewall.Apply(ports...)
+		done <- result{notes: notes}
+	}()
+	select {
+	case got := <-done:
+		if len(got.notes) == 0 {
+			return []string{"Брандмауэр Windows ничего не ответил. Пульт продолжает работу."}
+		}
+		return got.notes
+	case <-time.After(15 * time.Second):
+		return []string{"Брандмауэр Windows не ответил за 15 с. Пульт продолжает работу без нового правила. Защиту антивируса не отключайте."}
+	}
+}
+
+func announce(ctx context.Context, server *agent.Server, phones *store.Store, phone []lan.Adapter, fingerprint string) error {
+	if len(phone) == 0 {
+		return errors.New("Объявление в локальной сети пропущено: нет адреса Wi-Fi или Ethernet.")
+	}
+	if err := mdns.Probe(); err != nil {
+		bootlog.Printf("mDNS: %v", err)
+		fmt.Println(" ", err)
+		fmt.Println("  Это не мешает работе. Корпоративный Wi-Fi часто запрещает multicast. Адрес выше открывается вручную.")
+	}
+	addresses := make([]string, 0, len(phone))
+	for _, adapter := range phone {
+		addresses = append(addresses, adapter.Address)
+	}
+	host := phones.HostID()
+	if len(host) > 8 {
+		host = host[:8]
+	}
+	packet, err := mdns.BuildAnnouncement(sanitize(server.Name), host+".local", server.Port(), addresses, map[string]string{
+		"os": "windows", "ver": "1", "fp": fingerprintShort(fingerprint), "fly": fmt.Sprint(server.Port()),
 	})
+	if err != nil {
+		return err
+	}
+	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				bootlog.Printf("mDNS остановился: %v", recovered)
+			}
+		}()
+		mdns.Advertise(ctx, packet)
+	}()
+	return nil
+}
+
+func fail(err error) int {
+	bootlog.Fail(err)
+	return 1
 }
 
 func printConsole(server *agent.Server, phone, skipped []lan.Adapter, fingerprint string) {
@@ -197,10 +344,16 @@ func report(server *agent.Server, phone []lan.Adapter, notes []string) {
 	}
 	for _, line := range diag.Explain(facts) {
 		fmt.Println(line)
+		bootlog.Printf("%s", strings.TrimSpace(line))
 	}
 }
 
 func watchNetwork(ctx context.Context, server *agent.Server, skipFirewall bool) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			bootlog.Printf("наблюдение за сетью остановилось: %v", recovered)
+		}
+	}()
 	last := ""
 	if phone, _, _, err := lan.Interfaces(); err == nil && len(phone) > 0 {
 		last = phone[0].Address
@@ -222,7 +375,7 @@ func watchNetwork(ctx context.Context, server *agent.Server, skipFirewall bool) 
 			printPhone(phone[0], server)
 			notes := []string{"Проверка брандмауэра выключена (--no-firewall)."}
 			if !skipFirewall {
-				_, notes = firewall.Apply(server.Port(), server.HTTPPort())
+				notes = applyFirewall(server.Port(), server.HTTPPort())
 			}
 			report(server, phone, notes)
 		}
@@ -251,16 +404,6 @@ func fingerprintShort(value string) string {
 	return compact
 }
 
-func dataDir() string {
-	if appData := os.Getenv("APPDATA"); appData != "" {
-		return filepath.Join(appData, "Pult")
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".local", "share", "pult")
-	}
-	return "pult-data"
-}
-
 func downloadDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -275,9 +418,4 @@ func downloadDir() string {
 		home = profile
 	}
 	return filepath.Join(home, "Downloads", "Pult")
-}
-
-func exit(err error) {
-	fmt.Fprintln(os.Stderr, err)
-	os.Exit(1)
 }

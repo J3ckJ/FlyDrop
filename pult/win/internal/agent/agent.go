@@ -16,6 +16,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,11 +44,11 @@ type Server struct {
 	HostID      string
 	CA          []byte
 
-	mu       sync.Mutex
-	code     string
-	attempts map[string]attempt
-	sessions map[*session]struct{}
-	transfer transferState
+	mu            sync.Mutex
+	code          string
+	attempts      map[string]attempt
+	sessions      map[*session]struct{}
+	transfer      transferState
 	http          *http.Server
 	plain         *http.Server
 	listener      net.Listener
@@ -132,7 +133,14 @@ func (s *Server) Serve(material cert.Material, port int) error {
 	s.Fingerprint = material.Fingerprint
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
-	go s.schedules(ctx)
+	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				fmt.Fprintf(os.Stderr, "Пульт: расписание вызвало сбой и пропущено.\n%v\n%s\n", recovered, debug.Stack())
+			}
+		}()
+		s.schedules(ctx)
+	}()
 	raw, err := net.Listen("tcp4", fmt.Sprintf("0.0.0.0:%d", port))
 	if err != nil {
 		return fmt.Errorf("HTTPS 0.0.0.0:%d не открылся: %w", port, err)
@@ -157,8 +165,22 @@ func (s *Server) Serve(material cert.Material, port int) error {
 	s.http = &http.Server{Handler: s, ReadHeaderTimeout: 10 * time.Second}
 	s.plain = &http.Server{Handler: http.HandlerFunc(s.servePlain), ReadHeaderTimeout: 10 * time.Second}
 	errors := make(chan error, 2)
-	go func() { errors <- s.http.Serve(listener) }()
-	go func() { errors <- s.plain.Serve(plain) }()
+	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				errors <- fmt.Errorf("Сбой HTTPS: %v", recovered)
+			}
+		}()
+		errors <- s.http.Serve(listener)
+	}()
+	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				errors <- fmt.Errorf("Сбой HTTP: %v", recovered)
+			}
+		}()
+		errors <- s.plain.Serve(plain)
+	}()
 	return <-errors
 }
 

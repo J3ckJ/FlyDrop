@@ -27,6 +27,39 @@ jobs:
           path: pult/dist/pult.exe
           if-no-files-found: error
 
+  # Run the unsigned exe on a clean Windows runner. A crash fails this job.
+  # PULT_SELFTEST_NO_PAUSE stops a runner whose console process count is 1
+  # from waiting for Enter.
+  selftest:
+    needs: exe
+    runs-on: windows-latest
+    env:
+      PULT_SELFTEST_NO_PAUSE: "1"
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pult-windows-amd64
+      - name: Self-test pult.exe
+        shell: pwsh
+        run: |
+          & .\pult.exe --selftest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $blob = ""
+          foreach ($path in @(
+            (Join-Path $env:LOCALAPPDATA "Pult\pult.log"),
+            (Join-Path (Get-Location) "pult.log")
+          )) {
+            if (Test-Path $path) {
+              Write-Host "---- $path"
+              Get-Content $path -Tail 120
+              $blob += Get-Content $path -Raw
+            }
+          }
+          if ($blob -notmatch "PULT_SELFTEST_OK") {
+            Write-Host "self-test log has no success line"
+            exit 1
+          }
+
   # secrets are not allowed in a job-level if. That expression rejects the whole
   # workflow before exe starts, so the unsigned artifact never appears.
   # The certificate is mapped into the job environment and checked on each step.
