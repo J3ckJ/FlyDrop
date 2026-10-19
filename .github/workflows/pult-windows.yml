@@ -27,23 +27,31 @@ jobs:
           path: pult/dist/pult.exe
           if-no-files-found: error
 
-  # Authenticode runs only after a certificate is stored as a base64 secret PULT_CERT_PFX
-  # and PULT_CERT_PASSWORD. Until then this job is skipped and the unsigned exe above is the artifact.
+  # secrets are not allowed in a job-level if. That expression rejects the whole
+  # workflow before exe starts, so the unsigned artifact never appears.
+  # The certificate is mapped into the job environment and checked on each step.
   sign:
     needs: exe
-    if: ${{ secrets.PULT_CERT_PFX != '' }}
     runs-on: windows-latest
+    env:
+      PULT_CERT_PFX: ${{ secrets.PULT_CERT_PFX }}
+      PULT_CERT_PASSWORD: ${{ secrets.PULT_CERT_PASSWORD }}
     steps:
       - uses: actions/download-artifact@v4
+        if: env.PULT_CERT_PFX != ''
         with:
           name: pult-windows-amd64
       - name: Sign pult.exe
+        if: env.PULT_CERT_PFX != ''
         shell: pwsh
         run: |
-          $bytes = [Convert]::FromBase64String("${{ secrets.PULT_CERT_PFX }}")
+          if ([string]::IsNullOrWhiteSpace($env:PULT_CERT_PFX)) { exit 0 }
+          $bytes = [Convert]::FromBase64String($env:PULT_CERT_PFX)
           [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\pult.pfx", $bytes)
-          signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$env:RUNNER_TEMP\pult.pfx" /p "${{ secrets.PULT_CERT_PASSWORD }}" .\pult.exe
+          signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$env:RUNNER_TEMP\pult.pfx" /p "$env:PULT_CERT_PASSWORD" .\pult.exe
       - uses: actions/upload-artifact@v4
+        if: env.PULT_CERT_PFX != ''
         with:
           name: pult-windows-amd64-signed
           path: pult.exe
+          if-no-files-found: error

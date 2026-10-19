@@ -3,6 +3,7 @@ import os from 'node:os';
 import { timingSafeEqual } from 'node:crypto';
 import { emptyVault, generateTLS } from '../../../security.js';
 import { createHttpHandler } from './http.js';
+import { createPlainHandler, listenPlain } from './plain.js';
 import { encodeFrame } from './jpeg.js';
 import { createPush } from './push.js';
 import { currentLan } from './lan.js';
@@ -304,11 +305,21 @@ export async function createAgent(options = {}) {
     });
   });
 
+  const requested = options.port ?? DEFAULT_PORT;
+  const listenHost = !options.host || options.host === 'localhost' || options.host === '127.0.0.1' ? '0.0.0.0' : options.host;
   await new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(options.port ?? DEFAULT_PORT, options.host || '0.0.0.0', resolve);
+    server.listen(requested, listenHost, resolve);
   });
   const port = server.address().port;
+  const plain = await listenPlain(createPlainHandler({
+    material,
+    hostId: store.data.hostId,
+  }), options.httpPort ?? (requested === 0 ? 0 : requested + 1)).catch(error => {
+    server.close();
+    throw error;
+  });
+  const httpPort = plain.address().port;
   const discovery = options.advertise === false ? null : advertise({
     instance: name.replace(/[^\w\- .а-яА-ЯёЁ]/gu, '').trim() || 'Pult',
     host: `${vault.hostId.slice(0, 8)}.local`,
@@ -333,6 +344,9 @@ export async function createAgent(options = {}) {
 
   return {
     port,
+    httpPort,
+    bound: `${server.address().address}:${port}`,
+    plainBound: `${plain.address().address}:${httpPort}`,
     name,
     os: osName,
     mac,
@@ -357,6 +371,7 @@ export async function createAgent(options = {}) {
       }
       if (platform.close) platform.close();
       await fly?.close();
+      await new Promise(resolve => plain.close(resolve));
       await new Promise(resolve => server.close(resolve));
     },
   };

@@ -48,10 +48,13 @@ type Server struct {
 	attempts map[string]attempt
 	sessions map[*session]struct{}
 	transfer transferState
-	http     *http.Server
-	listener net.Listener
-	port     int
-	cancel   context.CancelFunc
+	http          *http.Server
+	plain         *http.Server
+	listener      net.Listener
+	plainListener net.Listener
+	port          int
+	httpPort      int
+	cancel        context.CancelFunc
 }
 
 type attempt struct {
@@ -97,10 +100,29 @@ func (s *Server) Code() string {
 	return s.code
 }
 
-// Port is the bound TCP port.
+// Port is the bound HTTPS port.
 func (s *Server) Port() int { return s.port }
 
-// Serve listens until Close.
+// HTTPPort is the plain HTTP port used for /setup and /ping.
+func (s *Server) HTTPPort() int { return s.httpPort }
+
+// Bound is the HTTPS listen address, for example 0.0.0.0:4720.
+func (s *Server) Bound() string {
+	if s.listener == nil {
+		return ""
+	}
+	return s.listener.Addr().String()
+}
+
+// PlainBound is the plain HTTP listen address.
+func (s *Server) PlainBound() string {
+	if s.plainListener == nil {
+		return ""
+	}
+	return s.plainListener.Addr().String()
+}
+
+// Serve listens on every IPv4 interface until Close.
 func (s *Server) Serve(material cert.Material, port int) error {
 	certificate, err := tls.X509KeyPair(material.Cert, material.Key)
 	if err != nil {
@@ -111,29 +133,45 @@ func (s *Server) Serve(material cert.Material, port int) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	go s.schedules(ctx)
-	listener, err := tls.Listen("tcp", fmt.Sprintf(":%d", port), &tls.Config{
+	raw, err := net.Listen("tcp4", fmt.Sprintf("0.0.0.0:%d", port))
+	if err != nil {
+		return fmt.Errorf("HTTPS 0.0.0.0:%d не открылся: %w", port, err)
+	}
+	plainPort := 0
+	if port != 0 {
+		plainPort = port + 1
+	}
+	plain, err := net.Listen("tcp4", fmt.Sprintf("0.0.0.0:%d", plainPort))
+	if err != nil {
+		_ = raw.Close()
+		return fmt.Errorf("HTTP 0.0.0.0:%d не открылся: %w", plainPort, err)
+	}
+	listener := tls.NewListener(raw, &tls.Config{
 		Certificates: []tls.Certificate{certificate},
 		MinVersion:   tls.VersionTLS12,
 	})
-	if err != nil {
-		return err
-	}
 	s.listener = listener
-	s.port = listener.Addr().(*net.TCPAddr).Port
-	s.http = &http.Server{
-		Handler:           s,
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-	return s.http.Serve(listener)
+	s.plainListener = plain
+	s.port = raw.Addr().(*net.TCPAddr).Port
+	s.httpPort = plain.Addr().(*net.TCPAddr).Port
+	s.http = &http.Server{Handler: s, ReadHeaderTimeout: 10 * time.Second}
+	s.plain = &http.Server{Handler: http.HandlerFunc(s.servePlain), ReadHeaderTimeout: 10 * time.Second}
+	errors := make(chan error, 2)
+	go func() { errors <- s.http.Serve(listener) }()
+	go func() { errors <- s.plain.Serve(plain) }()
+	return <-errors
 }
 
-// Close stops the listener and the desktop.
+// Close stops both listeners and the desktop.
 func (s *Server) Close() error {
 	if s.cancel != nil {
 		s.cancel()
 	}
 	if s.http != nil {
 		_ = s.http.Close()
+	}
+	if s.plain != nil {
+		_ = s.plain.Close()
 	}
 	if s.Desktop != nil {
 		_ = s.Desktop.Close()
@@ -156,13 +194,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 	if r.Method == http.MethodGet {
 		if s.serveStatic(w, r) {
 			return
 		}
 	}
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/ping":
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write([]byte("ok\n"))
 	case r.Method == http.MethodGet && r.URL.Path == "/ca.cer":
 		w.Header().Set("Content-Type", "application/pkix-cert")
 		w.Header().Set("Content-Disposition", `attachment; filename="Pult.cer"`)
@@ -203,6 +245,9 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request) bool {
 	name := r.URL.Path
 	if name == "/" {
 		name = "/index.html"
+	}
+	if name == "/setup" {
+		name = "/setup.html"
 	}
 	name = path.Clean(name)
 	if strings.Contains(name, "..") {

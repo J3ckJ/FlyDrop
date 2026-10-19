@@ -3,4 +3,4 @@
 package firewall
 
 // Apply is a no-op outside the Windows executable.
-func Apply(int) (bool, []string) { return false, nil }
+func Apply(...int) (bool, []string) { return false, nil }

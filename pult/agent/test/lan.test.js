@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import QRCode from 'qrcode';
-import { describeAdapters, parseDarwinRoute, parseLinuxProcRoute, parseWindowsRoutePrint } from '../src/lan.js';
+import { describeAdapters, isHotspot, parseDarwinRoute, parseLinuxProcRoute, parseWindowsRoutePrint } from '../src/lan.js';
 import { ensureWindowsFirewall, firewallAllowsPort, planFirewall } from '../src/firewall.js';
 
 const owner = {
@@ -40,6 +40,20 @@ test('a lower-metric Ethernet route wins over Wi-Fi, and a virtual default route
   const onlyVirtualRoute = describeAdapters(owner, [{ name: 'vEthernet (WSL)', metric: 0, address: '172.19.224.1', gateway: '172.19.224.2' }]);
   assert.equal(onlyVirtualRoute.phone[0].name, 'Wi-Fi');
   assert.equal(onlyVirtualRoute.foreignGateway, true);
+});
+
+test('an iPhone hotspot address is offered ahead of the office gateway', () => {
+  const lan = describeAdapters({
+    'Wi-Fi': [{ family: 'IPv4', internal: false, address: '10.1.2.3', mac: 'aa:aa:aa:aa:aa:aa' }],
+    'Wi-Fi 2': [{ family: 'IPv4', internal: false, address: '172.20.10.4', mac: 'bb:bb:bb:bb:bb:bb' }],
+  }, [
+    { address: '10.1.2.3', metric: 5, name: '', gateway: '10.1.2.1' },
+    { address: '172.20.10.4', metric: 40, name: '', gateway: '172.20.10.1' },
+  ]);
+  assert.equal(lan.phone[0].address, '172.20.10.4');
+  assert.equal(lan.hotspot, true);
+  assert.equal(isHotspot('172.20.10.14'), true);
+  assert.equal(isHotspot('172.20.10.16'), false);
 });
 
 test('linux and macOS default routes parse to the gateway interface', () => {

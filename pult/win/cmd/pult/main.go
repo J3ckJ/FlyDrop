@@ -14,6 +14,7 @@ import (
 
 	"github.com/J3ckJ/FlyDrop/pult/win/internal/agent"
 	"github.com/J3ckJ/FlyDrop/pult/win/internal/cert"
+	"github.com/J3ckJ/FlyDrop/pult/win/internal/diag"
 	"github.com/J3ckJ/FlyDrop/pult/win/internal/firewall"
 	"github.com/J3ckJ/FlyDrop/pult/win/internal/lan"
 	"github.com/J3ckJ/FlyDrop/pult/win/internal/mdns"
@@ -91,20 +92,18 @@ func main() {
 			time.Sleep(20 * time.Millisecond)
 		}
 	}
-	if server.Port() == 0 {
+	if server.Port() == 0 || server.HTTPPort() == 0 {
 		exit(fmt.Errorf("Порт не открылся"))
-	}
-	printConsole(server, phone, skipped, material.Fingerprint)
-	if !*noFirewall {
-		_, notes := firewall.Apply(server.Port())
-		for _, note := range notes {
-			fmt.Println(" ", note)
-		}
-	} else {
-		fmt.Println("  Проверка брандмауэра выключена (--no-firewall).")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	printConsole(server, phone, skipped, material.Fingerprint)
+	notes := []string{"Проверка брандмауэра выключена (--no-firewall)."}
+	if !*noFirewall {
+		_, notes = firewall.Apply(server.Port(), server.HTTPPort())
+	}
+	report(server, phone, notes)
+	go watchNetwork(ctx, server, *noFirewall)
 	if !*noMDNS && len(phone) > 0 {
 		addresses := make([]string, 0, len(phone))
 		for _, adapter := range phone {
@@ -136,18 +135,15 @@ func printConsole(server *agent.Server, phone, skipped []lan.Adapter, fingerprin
 	fmt.Println("  Пульт")
 	fmt.Printf("  Компьютер: %s · windows\n", server.Name)
 	fmt.Printf("  Код сопряжения: %s\n", server.Code())
-	fmt.Printf("  Порт: %d  ·  только локальная сеть\n", server.Port())
+	fmt.Printf("  Слушает IPv4 %s и %s. Это не localhost.\n", server.Bound(), server.PlainBound())
 	if len(phone) > 0 {
-		url := fmt.Sprintf("https://%s:%d/", phone[0].Address, server.Port())
-		fmt.Printf("  iPhone: %s\n", url)
-		fmt.Printf("  Адаптер: %s\n", phone[0].Name)
-		qrterminal.GenerateHalfBlock(url, qrterminal.M, os.Stdout)
+		printPhone(phone[0], server)
 		for _, extra := range phone[1:] {
-			fmt.Printf("  Ещё физический адаптер: https://%s:%d/  ·  %s\n", extra.Address, server.Port(), extra.Name)
+			fmt.Printf("  Ещё адрес: http://%s:%d/setup  ·  %s\n", extra.Address, server.HTTPPort(), extra.Name)
 		}
 	} else {
-		fmt.Printf("  iPhone: https://<адрес Wi-Fi компьютера>:%d/\n", server.Port())
 		fmt.Println("  Не найден адаптер Wi-Fi или Ethernet в локальной сети.")
+		fmt.Println("  Включите на iPhone режим модема и подключите к нему этот компьютер.")
 	}
 	if len(skipped) > 0 {
 		fmt.Println("  Не открывайте эти адреса на iPhone — это виртуальные или локальные адаптеры:")
@@ -155,13 +151,82 @@ func printConsole(server *agent.Server, phone, skipped []lan.Adapter, fingerprin
 			fmt.Printf("    %s  %s\n", item.Name, item.Address)
 		}
 	}
-	fmt.Printf("  На этом компьютере: https://localhost:%d/\n", server.Port())
+	fmt.Printf("  На этом компьютере: http://127.0.0.1:%d/ping и https://localhost:%d/\n", server.HTTPPort(), server.Port())
 	fmt.Printf("  Отпечаток: %s\n", fingerprint)
 	if server.MAC != "" {
 		fmt.Printf("  MAC для Wake-on-LAN: %s\n", server.MAC)
 	}
 	fmt.Printf("  Файлы с iPhone: %s\n", server.Downloads)
 	fmt.Println("  Уведомления Windows Пульт не читает: обычной программе Центр уведомлений недоступен.")
+}
+
+func printPhone(adapter lan.Adapter, server *agent.Server) {
+	if lan.IsHotspot(adapter.Address) {
+		fmt.Println("  Компьютер подключён к точке доступа iPhone. Откройте адрес на этом телефоне.")
+	}
+	setup := fmt.Sprintf("http://%s:%d/setup", adapter.Address, server.HTTPPort())
+	page := fmt.Sprintf("https://%s:%d/", adapter.Address, server.Port())
+	fmt.Printf("  Адаптер: %s\n", adapter.Name)
+	fmt.Println("  Сначала на iPhone, обычный HTTP, сертификат ещё не нужен:")
+	fmt.Printf("  %s\n", setup)
+	qrterminal.GenerateHalfBlock(setup, qrterminal.M, os.Stdout)
+	fmt.Printf("  Проверка: http://%s:%d/ping — на экране должно быть ok\n", adapter.Address, server.HTTPPort())
+	fmt.Println("  После профиля и доверия сертификату:")
+	fmt.Printf("  %s\n", page)
+	qrterminal.GenerateHalfBlock(page, qrterminal.M, os.Stdout)
+}
+
+func report(server *agent.Server, phone []lan.Adapter, notes []string) {
+	facts := diag.Facts{
+		BindHTTPS: server.Bound(),
+		BindHTTP:  server.PlainBound(),
+		HTTPSPort: server.Port(),
+		HTTPPort:  server.HTTPPort(),
+		Notes:     notes,
+	}
+	if len(phone) > 0 {
+		facts.Address = phone[0].Address
+		facts.Adapter = phone[0].Name
+		facts.Hotspot = lan.IsHotspot(phone[0].Address)
+		err := diag.Probe(fmt.Sprintf("http://%s:%d/ping", phone[0].Address, server.HTTPPort()))
+		if err != nil {
+			facts.ProbeError = err.Error()
+		} else {
+			facts.ProbeOK = true
+		}
+	}
+	for _, line := range diag.Explain(facts) {
+		fmt.Println(line)
+	}
+}
+
+func watchNetwork(ctx context.Context, server *agent.Server, skipFirewall bool) {
+	last := ""
+	if phone, _, _, err := lan.Interfaces(); err == nil && len(phone) > 0 {
+		last = phone[0].Address
+	}
+	ticker := time.NewTicker(8 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			phone, _, _, err := lan.Interfaces()
+			if err != nil || len(phone) == 0 || phone[0].Address == last {
+				continue
+			}
+			last = phone[0].Address
+			fmt.Println()
+			fmt.Println("  Сеть сменилась.")
+			printPhone(phone[0], server)
+			notes := []string{"Проверка брандмауэра выключена (--no-firewall)."}
+			if !skipFirewall {
+				_, notes = firewall.Apply(server.Port(), server.HTTPPort())
+			}
+			report(server, phone, notes)
+		}
+	}
 }
 
 func sanitize(name string) string {

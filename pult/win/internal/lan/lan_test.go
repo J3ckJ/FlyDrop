@@ -2,6 +2,22 @@ package lan
 
 import "testing"
 
+func TestHotspotBeatsTheOfficeGateway(t *testing.T) {
+	phone, _ := Phone([]Adapter{
+		{Name: "Wi-Fi", Address: "10.1.2.3"},
+		{Name: "Wi-Fi 2", Address: "172.20.10.4"},
+	}, []Route{
+		{Address: "10.1.2.3", Metric: 10},
+		{Address: "172.20.10.4", Metric: 50},
+	}, nil)
+	if phone[0].Address != "172.20.10.4" {
+		t.Fatalf("hotspot was not first: %+v", phone)
+	}
+	if !IsHotspot("172.20.10.2") || IsHotspot("172.20.10.20") || IsHotspot("10.0.0.1") {
+		t.Fatal("hotspot range")
+	}
+}
+
 func TestGatewayAdapterComesFirst(t *testing.T) {
 	phone, skipped := Phone([]Adapter{
 		{Name: "vEthernet (WSL)", Address: "172.19.224.1"},

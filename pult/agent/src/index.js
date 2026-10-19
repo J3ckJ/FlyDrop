@@ -2,7 +2,9 @@ import os from 'node:os';
 import path from 'node:path';
 import QRCode from 'qrcode';
 import { createAgent } from './agent.js';
+import { explainReachability, probePing, windowsRefusal } from './diag.js';
 import { ensureWindowsFirewall, firewallDisabled } from './firewall.js';
+import { isHotspot } from './lan.js';
 import { openStore } from './store.js';
 
 function flag(name) {
@@ -23,13 +25,7 @@ const dataDir = flag('--data') && flag('--data') !== true ? flag('--data') : def
 
 if (process.platform === 'win32' && !flag('--mock') && !flag('--node') && !flag('--revoke')) {
   console.error('');
-  console.error('  Пульт на Windows запускается файлом pult.exe.');
-  console.error('  Команда node src\\index.js для Windows выглядит как сценарий, и антивирус блокирует управление.');
-  console.error('  Скачайте pult.exe из артефакта GitHub Actions «Pult Windows» или соберите на этом компьютере:');
-  console.error('    cd pult');
-  console.error('    set CGO_ENABLED=0');
-  console.error('    go build -trimpath -o pult.exe .\\win\\cmd\\pult');
-  console.error('  Затем дважды щёлкните pult.exe. Репетиция интерфейса: node src\\index.js --mock');
+  console.error(windowsRefusal());
   console.error('');
   process.exit(1);
 }
@@ -52,42 +48,60 @@ const agent = await createAgent({
 
 const fly = agent.fly?.info?.() || null;
 const primary = agent.lan.phone[0];
+const setupUrl = primary ? `http://${primary.address}:${agent.httpPort}/setup` : '';
 const phoneUrl = primary ? `https://${primary.address}:${agent.port}/` : '';
 console.log('');
 console.log('  Пульт');
 console.log(`  Компьютер: ${agent.name} · ${agent.os}`);
 console.log(`  Код сопряжения: ${agent.pairingCode}`);
-console.log(`  Порт: ${agent.port}  ·  только локальная сеть`);
+console.log(`  Слушает IPv4 ${agent.bound} и ${agent.plainBound}. Это не localhost.`);
 if (primary) {
-  console.log(`  iPhone: ${phoneUrl}`);
+  if (isHotspot(primary.address)) console.log('  Компьютер подключён к точке доступа iPhone. Откройте адрес на этом телефоне.');
   console.log(`  Адаптер: ${primary.name}`);
   if (agent.lan.foreignGateway) console.log('  Шлюз по умолчанию смотрит не в этот адаптер. iPhone должен быть в той же сети, что и адрес выше.');
   else if (!agent.lan.gateway) console.log('  Шлюз по умолчанию не найден. Если сетей несколько, сверьте адрес с Wi-Fi компьютера.');
+  console.log('  Сначала на iPhone, обычный HTTP, сертификат ещё не нужен:');
+  console.log(`  ${setupUrl}`);
+  const setupQR = await QRCode.toString(setupUrl, { type: 'utf8', errorCorrectionLevel: 'M', margin: 2 });
+  console.log(setupQR.split('\n').map(line => (line ? `  ${line}` : '')).join('\n'));
+  console.log(`  Проверка: http://${primary.address}:${agent.httpPort}/ping — на экране должно быть ok`);
+  console.log('  После профиля и доверия сертификату:');
+  console.log(`  ${phoneUrl}`);
   const qr = await QRCode.toString(phoneUrl, { type: 'utf8', errorCorrectionLevel: 'M', margin: 2 });
   console.log(qr.split('\n').map(line => (line ? `  ${line}` : '')).join('\n'));
-  const extraLabel = agent.lan.gateway ? 'Другая сеть со шлюзом' : 'Ещё физический адаптер';
-  for (const extra of agent.lan.phone.slice(1)) console.log(`  ${extraLabel}: https://${extra.address}:${agent.port}/  ·  ${extra.name}`);
+  for (const extra of agent.lan.phone.slice(1)) console.log(`  Ещё адрес: http://${extra.address}:${agent.httpPort}/setup  ·  ${extra.name}`);
 } else {
-  console.log(`  iPhone: https://<адрес Wi-Fi компьютера>:${agent.port}/`);
   console.log('  Не найден адаптер Wi-Fi или Ethernet в локальной сети.');
+  console.log('  Включите на iPhone режим модема и подключите к нему этот компьютер.');
 }
 if (agent.lan.skipped.length) {
   console.log('  Не открывайте эти адреса на iPhone — это виртуальные или локальные адаптеры:');
   for (const item of agent.lan.skipped) console.log(`    ${item.name}  ${item.address}  ·  ${item.reason === 'link-local' ? '169.254, связи нет' : 'виртуальный адаптер'}`);
 }
-console.log(`  На этом компьютере: https://localhost:${agent.port}/`);
+console.log(`  На этом компьютере: http://127.0.0.1:${agent.httpPort}/ping и https://localhost:${agent.port}/`);
 console.log(`  Отпечаток: ${agent.fingerprint}`);
 if (agent.mac) console.log(`  MAC для Wake-on-LAN: ${agent.mac}`);
 if (fly?.external) console.log(`  FlyDrop уже запущен: https://…:${fly.httpsPort} — подтвердите телефон в его окне`);
 else if (fly) console.log(`  FlyDrop внутри Пульта: HTTPS ${fly.httpsPort}, файлы до 1 ГБ`);
 else console.log('  FlyDrop выключен');
-const firewallPorts = [agent.port, fly?.httpsPort].filter(Boolean);
+const firewallPorts = [agent.port, agent.httpPort, fly?.httpsPort].filter(Boolean);
 const firewall = await ensureWindowsFirewall({
   ports: firewallPorts,
   adapterName: primary?.name,
   disabled: firewallDisabled(),
 });
-for (const note of firewall.notes) console.log(`  ${note}`);
+const probe = primary ? await probePing(`http://${primary.address}:${agent.httpPort}/ping`) : { ok: false, error: 'нет адреса' };
+for (const line of explainReachability({
+  bindHTTPS: agent.bound,
+  bindHTTP: agent.plainBound,
+  address: primary?.address || '',
+  adapter: primary?.name || '',
+  httpPort: agent.httpPort,
+  probeOK: probe.ok,
+  probeError: probe.error || (probe.ok ? '' : `ответ ${probe.status}`),
+  hotspot: primary ? isHotspot(primary.address) : false,
+  notes: firewall.notes,
+})) console.log(line);
 console.log('');
 console.log('  Телефон вводит этот код. Без кода управление недоступно.');
 console.log('  Телефон и компьютер — в одной Wi-Fi. Сканируйте код или откройте строку iPhone.');

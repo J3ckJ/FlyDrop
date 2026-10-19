@@ -340,6 +340,67 @@ func payloadOf(frame []byte) []byte {
 	return frame[start:]
 }
 
+func TestPlainHTTPSetupAndPing(t *testing.T) {
+	dir := t.TempDir()
+	phones, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	material, err := cert.Load(dir, []string{"127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := New(&fakeDesktop{}, phones)
+	server.HostID = phones.HostID()
+	go func() { _ = server.Serve(material, 0) }()
+	t.Cleanup(func() { _ = server.Close() })
+	deadline := time.Now().Add(3 * time.Second)
+	for (server.Port() == 0 || server.HTTPPort() == 0) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !bytes.Contains([]byte(server.Bound()), []byte("0.0.0.0:")) || !bytes.Contains([]byte(server.PlainBound()), []byte("0.0.0.0:")) {
+		t.Fatalf("bind https=%s http=%s", server.Bound(), server.PlainBound())
+	}
+	ping := getBody(t, "http://127.0.0.1:"+strconvItoa(server.HTTPPort())+"/ping")
+	if ping.status != 200 || !bytes.HasPrefix(ping.body, []byte("ok")) {
+		t.Fatalf("ping %d %s", ping.status, ping.body)
+	}
+	setup := getBody(t, "http://127.0.0.1:"+strconvItoa(server.HTTPPort())+"/setup")
+	if setup.status != 200 || !bytes.Contains(setup.body, []byte("4721")) {
+		t.Fatalf("setup %d", setup.status)
+	}
+	denied := getBody(t, "http://127.0.0.1:"+strconvItoa(server.HTTPPort())+"/app.js")
+	if denied.status != 404 {
+		t.Fatalf("plain app.js %d", denied.status)
+	}
+}
+
+type httpBody struct {
+	status int
+	body   []byte
+}
+
+func getBody(t *testing.T, url string) httpBody {
+	t.Helper()
+	var last error
+	for attempt := 0; attempt < 20; attempt++ {
+		response, err := http.Get(url)
+		if err != nil {
+			last = err
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return httpBody{status: response.StatusCode, body: body}
+	}
+	t.Fatal(last)
+	return httpBody{}
+}
+
 func mustJSON(t *testing.T, payload map[string]any) []byte {
 	t.Helper()
 	raw, err := json.Marshal(payload)

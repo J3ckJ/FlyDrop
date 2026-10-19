@@ -102,6 +102,11 @@ export function createHttpHandler(ctx) {
         res.end(body);
         return;
       }
+      if (req.method === 'GET' && url.pathname === '/ping') {
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end('ok\n');
+        return;
+      }
       if (req.method === 'GET' && url.pathname === '/ca.cer') {
         res.writeHead(200, { 'Content-Type': 'application/pkix-cert', 'Content-Disposition': 'attachment; filename="Pult.cer"' });
         res.end(ctx.material.ca);

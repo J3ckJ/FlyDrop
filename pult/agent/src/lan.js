@@ -7,6 +7,11 @@ const VIRTUAL = /virtual|vethernet|hyper-?v|wsl|docker|virtualbox|vbox|vmware|vm
 const WIFI = /wi-?fi|wlan|wireless|беспровод/i;
 const ETHERNET = /ethernet|локальн|lan\b/i;
 
+export function isHotspot(ip) {
+  const parts = plainIP(ip).split('.').map(part => Number(part));
+  return parts.length === 4 && parts[0] === 172 && parts[1] === 20 && parts[2] === 10 && parts[3] >= 0 && parts[3] <= 15;
+}
+
 export function isLinkLocal(ip) {
   return /^169\.254\.\d{1,3}\.\d{1,3}$/.test(plainIP(ip));
 }
@@ -104,7 +109,9 @@ export function describeAdapters(interfaceMap, routes = []) {
   for (const adapter of preferred) {
     if (!ordered.some(item => item.address === adapter.address)) ordered.push(adapter);
   }
-  return { phone: ordered, skipped, gateway: routed.length > 0, foreignGateway: routes.length > 0 && routed.length === 0 };
+  const hotspot = ordered.find(item => isHotspot(item.address));
+  const phone = hotspot ? [hotspot, ...ordered.filter(item => item !== hotspot)] : ordered;
+  return { phone, skipped, gateway: routed.length > 0, foreignGateway: routes.length > 0 && routed.length === 0, hotspot: Boolean(hotspot) };
 }
 
 export async function readDefaultRoutes(options = {}) {

@@ -4,13 +4,24 @@ package firewall
 
 import (
 	"strconv"
+	"strings"
 
 	ole "github.com/go-ole/go-ole"
 	"github.com/go-ole/go-ole/oleutil"
 )
 
 // Apply adds an inbound TCP rule for the private profile through the documented firewall COM API.
-func Apply(port int) (bool, []string) {
+func Apply(ports ...int) (bool, []string) {
+	list := make([]string, 0, len(ports))
+	for _, port := range ports {
+		if port > 0 && port < 65536 {
+			list = append(list, strconv.Itoa(port))
+		}
+	}
+	if len(list) == 0 {
+		return false, []string{"Порт для правила брандмауэра не задан."}
+	}
+	portList := strings.Join(list, ",")
 	if err := ole.CoInitializeEx(0, ole.COINIT_MULTITHREADED); err != nil {
 		return false, []string{"Брандмауэр Windows недоступен. Если iPhone не открывается, запустите pult.exe от администратора один раз."}
 	}
@@ -55,7 +66,7 @@ func Apply(port int) (bool, []string) {
 	_, _ = oleutil.PutProperty(rule, "Name", "Pult")
 	_, _ = oleutil.PutProperty(rule, "Description", "Входящие подключения Пульта в частной сети")
 	_, _ = oleutil.PutProperty(rule, "Protocol", int32(6))
-	_, _ = oleutil.PutProperty(rule, "LocalPorts", strconv.Itoa(port))
+	_, _ = oleutil.PutProperty(rule, "LocalPorts", portList)
 	_, _ = oleutil.PutProperty(rule, "Direction", int32(1))
 	_, _ = oleutil.PutProperty(rule, "Action", int32(1))
 	_, _ = oleutil.PutProperty(rule, "Enabled", true)
@@ -63,7 +74,7 @@ func Apply(port int) (bool, []string) {
 	if _, err = oleutil.CallMethod(rules, "Add", rule); err != nil {
 		return false, []string{adminHint()}
 	}
-	return true, []string{"Для частной сети добавлено входящее правило TCP " + strconv.Itoa(port) + "."}
+	return true, []string{"Для частной сети добавлено входящее правило TCP " + portList + "."}
 }
 
 func adminHint() string {

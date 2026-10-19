@@ -1,6 +1,9 @@
 package lan
 
-import "regexp"
+import (
+	"net"
+	"regexp"
+)
 
 // Adapter is one IPv4 address the phone might use.
 type Adapter struct {
@@ -33,7 +36,7 @@ func Phone(adapters []Adapter, routes []Route, indexOf map[string]int) (phone []
 		phone = append(phone, adapter)
 	}
 	if len(routes) == 0 || len(phone) < 2 {
-		return phone, skipped
+		return preferHotspot(phone), skipped
 	}
 	best := -1
 	bestMetric := int(^uint(0) >> 1)
@@ -54,7 +57,26 @@ func Phone(adapters []Adapter, routes []Route, indexOf map[string]int) (phone []
 		reordered = append(reordered, phone[best+1:]...)
 		phone = reordered
 	}
-	return phone, skipped
+	return preferHotspot(phone), skipped
+}
+
+func preferHotspot(phone []Adapter) []Adapter {
+	for i, adapter := range phone {
+		if IsHotspot(adapter.Address) && i > 0 {
+			reordered := append([]Adapter{adapter}, phone[:i]...)
+			return append(reordered, phone[i+1:]...)
+		}
+	}
+	return phone
+}
+
+// IsHotspot reports an address in the iPhone personal hotspot range 172.20.10.0/28.
+func IsHotspot(ip string) bool {
+	parsed := net.ParseIP(ip).To4()
+	if parsed == nil || parsed[0] != 172 || parsed[1] != 20 || parsed[2] != 10 {
+		return false
+	}
+	return parsed[3] <= 15
 }
 
 func linkLocal(ip string) bool {
