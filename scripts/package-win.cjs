@@ -31,7 +31,12 @@ async function main() {
   await fs.cp(dist, unpacked, { recursive: true });
   await fs.rename(path.join(unpacked, 'electron.exe'), path.join(unpacked, 'FlyDrop.exe'));
   await fs.rm(path.join(unpacked, 'resources', 'default_app.asar'), { force: true });
-  for (const name of ['desktop', 'public', 'server.js', 'security.js']) await fs.cp(path.join(root, name), path.join(stage, name), { recursive: true });
+  if (process.platform === 'win32') {
+    const { pathToFileURL } = await import('node:url');
+    const { fetchConverters } = await import(pathToFileURL(path.join(root, 'scripts', 'fetch-converters.mjs')).href);
+    try { await fetchConverters(); } catch (error) { console.error(`Converter download skipped: ${error.message}`); }
+  }
+  for (const name of ['desktop', 'public', 'modes', 'server.js', 'security.js']) await fs.cp(path.join(root, name), path.join(stage, name), { recursive: true });
   await fs.mkdir(path.join(stage, 'build')); for (const name of ['tray.png', 'icon.ico']) await fs.copyFile(path.join(root, 'build', name), path.join(stage, 'build', name));
   const runtime = { name: metadata.name, version: metadata.version, main: metadata.main, type: metadata.type, description: metadata.description, author: metadata.author, dependencies: metadata.dependencies };
   await fs.writeFile(path.join(stage, 'package.json'), JSON.stringify(runtime, null, 2));
@@ -49,6 +54,12 @@ async function main() {
   }
   for (const name of Object.keys(runtime.dependencies)) await collect(name, root);
   await asar.createPackage(stage, path.join(unpacked, 'resources', 'app.asar'));
+  const converters = path.join(root, 'vendor', 'converters');
+  try {
+    await fs.access(path.join(converters, 'ffmpeg.exe'));
+    await fs.cp(converters, path.join(unpacked, 'resources', 'converters'), { recursive: true });
+    console.log('Bundled LGPL ffmpeg beside the app, outside the asar');
+  } catch { console.log('Converter binary not present; originals still save and the UI says so'); }
   console.log(`Packaged ${visited.size} runtime dependencies; no PowerShell or package-manager child process`);
   await build({ projectDir: root, prepackaged: unpacked, targets: Platform.WINDOWS.createTarget('portable', Arch.x64), config: { ...metadata.build, npmRebuild: false, electronVersion: metadata.devDependencies.electron.replace(/^[^\d]+/, '') } });
 }

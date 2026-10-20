@@ -1,0 +1,31 @@
+name: FlyDrop Windows
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Test
+        run: npm test
+      - name: Build portable exe
+        run: npm run build:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+      - name: Startup selftest
+        run: node scripts/selftest-exe.mjs
+      - name: Upload Windows app
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlyDrop-0.4.0-Windows
+          path: release/FlyDrop-*-Windows.exe
+          if-no-files-found: error

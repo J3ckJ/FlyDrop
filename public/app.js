@@ -1,4 +1,5 @@
 import { detectLanguage, translate, localize, applyDocument } from './i18n.js';
+import { startModes } from './modes.js';
 let lang = detectLanguage();
 const t = (key, vars) => translate(lang, key, vars);
 const locale = () => lang === 'en' ? 'en-GB' : 'ru-RU';
@@ -37,7 +38,8 @@ let booting = false;
 let qrMode = 'connect';
 let pairingTimer;
 const desktop = window.flydropDesktop;
-const VIEWS = ['transfer', 'inbox', 'security', 'how'];
+const VIEWS = ['transfer', 'buffer', 'upload', 'inbox', 'security', 'how'];
+let modes;
 let currentView = 'transfer';
 function viewFromLocation() {
   const name = location.hash.replace(/^#/, '').split('&')[0];
@@ -58,6 +60,7 @@ function showView(name, options = {}) {
   }
   const crumb = document.getElementById('crumb-page');
   if (crumb) crumb.textContent = t(`nav.${view}`);
+  modes?.viewChanged?.();
   if (!options.silent && location.hash !== `#${view}`) history[options.replace ? 'replaceState' : 'pushState'](null, '', `#${view}`);
   if (!options.keepScroll) window.scrollTo(0, 0);
 }
@@ -87,6 +90,7 @@ async function api(route, options = {}) {
 }
 function updateConnection(value) {
   connected = value; $('connection-status').classList.toggle('online', value);
+  modes?.online?.(value);
   $('connection-status').lastChild.textContent = value ? t('status.online') : t('status.offline');
   updateSend();
 }
@@ -184,6 +188,7 @@ function displayState(data) {
   renderSecurity(data.security); renderOnboarding();
   $('pwa-guide').hidden = !['phone', 'tablet'].includes(deviceType) || window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
   $('app').hidden = false; $('gate').hidden = true; $('loading').hidden = true;
+  modes?.apply?.(data);
 }
 function paintQr() {
   const link = current?.links.find(item => item.address === $('network').value);
@@ -411,6 +416,8 @@ function openEvents() {
   });
   events.addEventListener('pairings', event => { const requests = JSON.parse(event.data); if (current?.security) current.security.requests = requests; renderRequests(requests); renderOnboarding(); });
   events.addEventListener('trust', event => { current.security.trusted = JSON.parse(event.data); renderSecurity(current.security); renderOnboarding(); });
+  events.addEventListener('buffer', event => modes?.buffer?.(JSON.parse(event.data)));
+  events.addEventListener('unload', event => modes?.unload?.(JSON.parse(event.data)));
   events.addEventListener('revoked', () => { events.close(); current = null; pairKey = null; sessionStorage.removeItem('flydrop-pair'); showGate('Доступ отозван', 'Для нового подключения введите актуальный код с компьютера.', false); updateConnection(false); });
 }
 async function boot() {
@@ -753,6 +760,7 @@ for (const link of document.querySelectorAll('[data-view]')) {
 }
 window.addEventListener('hashchange', () => showView(viewFromLocation(), { silent: true }));
 window.addEventListener('popstate', () => showView(viewFromLocation(), { silent: true }));
+modes = startModes({ api, toast, desktop, showView });
 showView(viewFromLocation(), { replace: true });
 $('language-toggle')?.addEventListener('click', () => {
   lang = lang === 'en' ? 'ru' : 'en';
@@ -761,4 +769,4 @@ $('language-toggle')?.addEventListener('click', () => {
 });
 setInterval(renderHistory, 15000);
 showLanguage();
-void boot();
+if (!modes.shot) void boot();

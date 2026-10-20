@@ -1,0 +1,74 @@
+[
+  {
+    "id": "i1",
+    "width": 393,
+    "height": 852,
+    "mismatch": 40.52
+  },
+  {
+    "id": "i2",
+    "width": 393,
+    "height": 852,
+    "mismatch": 50.68
+  },
+  {
+    "id": "i3",
+    "width": 393,
+    "height": 852,
+    "mismatch": 44.15
+  },
+  {
+    "id": "i4",
+    "width": 393,
+    "height": 852,
+    "mismatch": 43.37
+  },
+  {
+    "id": "i5",
+    "width": 393,
+    "height": 852,
+    "mismatch": 27.73
+  },
+  {
+    "id": "i6",
+    "width": 393,
+    "height": 852,
+    "mismatch": 23.1
+  },
+  {
+    "id": "w1",
+    "width": 1000,
+    "height": 640,
+    "mismatch": 11.94
+  },
+  {
+    "id": "w2",
+    "width": 1000,
+    "height": 640,
+    "mismatch": 8.3
+  },
+  {
+    "id": "w3",
+    "width": 1000,
+    "height": 640,
+    "mismatch": 7.53
+  },
+  {
+    "id": "w1fly",
+    "width": 340,
+    "height": 205,
+    "mismatch": 14.45
+  },
+  {
+    "id": "w3toast",
+    "width": 360,
+    "height": 88,
+    "mismatch": 15.29
+  },
+  {
+    "id": "m1",
+    "width": 900,
+    "height": 560,
+    "mismatch": 5.43
+  }
+]

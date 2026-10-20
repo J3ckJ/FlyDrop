@@ -1,6 +1,6 @@
 {
   "name": "flydrop",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "main": "desktop/main.cjs",
   "author": "FlyDrop",
   "private": true,
@@ -31,6 +31,7 @@
     },
     "files": [
       "desktop/**",
+      "modes/**",
       "server.js",
       "security.js",
       "public/**",
