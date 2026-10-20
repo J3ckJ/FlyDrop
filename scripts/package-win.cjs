@@ -1,3 +1,4 @@
+const { spawn } = require('node:child_process');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createRequire } = require('node:module');
@@ -22,12 +23,27 @@ async function resolvePackage(name, from) {
     throw new Error(`Cannot resolve ${name}`);
   }
 }
+function run(file, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args, { stdio: 'inherit', shell: false, windowsHide: true });
+    child.on('error', reject);
+    child.on('exit', code => code === 0 ? resolve() : reject(new Error(`${path.basename(file)} завершился с кодом ${code}`)));
+  });
+}
+async function ensureElectron() {
+  const dist = path.join(root, 'node_modules', 'electron', 'dist');
+  const binary = path.join(dist, 'electron.exe');
+  try { await fs.access(binary); return dist; } catch { /* Electron 44 does not download the binary during npm ci. */ }
+  console.log('Downloading Electron for Windows');
+  await run(process.execPath, [path.join(root, 'node_modules', 'electron', 'install.js')]);
+  await fs.access(binary);
+  return dist;
+}
 async function main() {
   const metadata = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
   const stage = owned(path.join(release, 'staging')), unpacked = owned(path.join(release, 'win-unpacked'));
   await reset(stage); await reset(unpacked);
-  const dist = path.join(root, 'node_modules', 'electron', 'dist');
-  await fs.access(path.join(dist, 'electron.exe'));
+  const dist = await ensureElectron();
   await fs.cp(dist, unpacked, { recursive: true });
   await fs.rename(path.join(unpacked, 'electron.exe'), path.join(unpacked, 'FlyDrop.exe'));
   await fs.rm(path.join(unpacked, 'resources', 'default_app.asar'), { force: true });

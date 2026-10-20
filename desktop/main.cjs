@@ -1,7 +1,7 @@
 const { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, clipboard, Notification, ipcMain, dialog, shell, safeStorage } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
-const { existsSync } = require('node:fs');
+const { existsSync, mkdirSync, writeFileSync } = require('node:fs');
 const os = require('node:os');
 const { randomUUID } = require('node:crypto');
 const { pathToFileURL } = require('node:url');
@@ -70,16 +70,22 @@ async function materializeClipboard(value) {
 }
 app.enableSandbox();
 app.setAppUserModelId('local.flydrop.windows');
+function publishSelfTest(text) {
+  const body = text.endsWith('\n') ? text : `${text}\n`;
+  console.log(body);
+  const target = process.env.FLYDROP_SELFTEST_OUT;
+  if (!target) return;
+  try { mkdirSync(path.dirname(target), { recursive: true }); writeFileSync(target, body); } catch (error) { console.error(error); }
+}
 if (selftest) {
   app.disableHardwareAcceleration();
   app.commandLine.appendSwitch('disable-gpu');
   app.whenReady().then(async () => {
     const { runSelfTest } = await import(pathToFileURL(path.join(app.getAppPath(), 'modes', 'selftest.js')).href);
     const result = await runSelfTest();
-    console.log(result.log);
-    console.log('FLYDROP_SELFTEST_OK');
+    publishSelfTest(`${result.log}\nFLYDROP_SELFTEST_OK`);
     app.exit(0);
-  }).catch(error => { console.error(error); app.exit(1); });
+  }).catch(error => { publishSelfTest(`${error.stack || error.message || error}\nFLYDROP_SELFTEST_FAIL`); app.exit(1); });
 } else if (!smoke && !app.requestSingleInstanceLock()) { app.quit(); }
 else {
   app.on('second-instance', () => show());
