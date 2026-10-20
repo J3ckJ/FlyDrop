@@ -128,7 +128,31 @@ export function startModes({ api, toast, desktop, showView }) {
     const root = node('div', 'shot-root');
     const markup = SHOTS[shot];
     if (!markup) root.textContent = 'Нет такого кадра';
-    else root.innerHTML = markup;
+    else {
+      root.innerHTML = markup;
+      const overlayShot = shot === 'w1' ? 'w1fly' : shot === 'w3' ? 'w3toast' : '';
+      if (overlayShot && SHOTS[overlayShot]) {
+        const holder = document.createElement('div');
+        holder.innerHTML = SHOTS[overlayShot];
+        const overlay = holder.firstElementChild;
+        if (overlay) {
+          overlay.classList.add('shot-overlay');
+          root.append(overlay);
+        }
+      }
+      for (const element of root.querySelectorAll('[style]')) {
+        const text = element.getAttribute('style');
+        if (text) element.style.cssText = text;
+      }
+      for (const element of root.querySelectorAll('svg, svg *')) {
+        for (const property of ['width', 'height', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin']) {
+          const value = element.getAttribute(property);
+          if (!value) continue;
+          const css = (property === 'width' || property === 'height' || property === 'stroke-width') && /^\d+(\.\d+)?$/.test(value) ? `${value}px` : value;
+          element.style.setProperty(property, css);
+        }
+      }
+    }
     document.body.append(root);
     const loading = document.getElementById('loading');
     if (loading) loading.hidden = true;

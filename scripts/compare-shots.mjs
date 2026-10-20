@@ -79,6 +79,8 @@ function compare(design, ours, kind) {
   const side = new PNG({ width: width * 2 + 8, height });
   const diff = new PNG({ width, height });
   let bad = 0;
+  let harsh = 0;
+  let sum = 0;
   let seen = 0;
   for (let y = 0; y < height; y++) {
     const skip = masked(kind, y, height);
@@ -103,6 +105,8 @@ function compare(design, ours, kind) {
         continue;
       }
       seen++;
+      sum += delta;
+      if (Math.max(Math.abs(design.data[di] - ours.data[oi]), Math.abs(design.data[di + 1] - ours.data[oi + 1]), Math.abs(design.data[di + 2] - ours.data[oi + 2])) > 150) harsh++;
       if (delta > 36) {
         bad++;
         diff.data[out] = 255;
@@ -117,7 +121,7 @@ function compare(design, ours, kind) {
       }
     }
   }
-  return { bad, seen, ratio: seen ? bad / seen : 1, side, diff, width, height };
+  return { bad, harsh, seen, ratio: seen ? bad / seen : 1, mean: seen ? sum / (seen * 255 * 3) : 1, harshRatio: seen ? harsh / seen : 1, side, diff, width, height };
 }
 
 const app = await createApp({ runPlan: null });
@@ -137,8 +141,8 @@ try {
     const result = compare(design, ours, shot.mask);
     await writeFile(path.join(outDir, `${shot.id}-side.png`), PNG.sync.write(result.side));
     await writeFile(path.join(outDir, `${shot.id}-diff.png`), PNG.sync.write(result.diff));
-    report.push({ id: shot.id, width: result.width, height: result.height, mismatch: Number((result.ratio * 100).toFixed(2)) });
-    console.log(`${shot.id} ${result.width}x${result.height} mismatch ${report.at(-1).mismatch}%`);
+    report.push({ id: shot.id, width: result.width, height: result.height, mismatch: Number((result.ratio * 100).toFixed(2)), mean: Number((result.mean * 100).toFixed(3)), harsh: Number((result.harshRatio * 100).toFixed(3)) });
+    console.log(`${shot.id} ${result.width}x${result.height} mean ${report.at(-1).mean}% harsh ${report.at(-1).harsh}% mismatch ${report.at(-1).mismatch}%`);
   }
   await writeFile(path.join(outDir, 'report.json'), JSON.stringify(report, null, 2));
 } finally {

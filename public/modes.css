@@ -49,7 +49,7 @@
 .scr .sc i{font-style:normal;display:inline-block;padding:1px 8px;border-radius:7px;background:#24272c;color:#fff;font-weight:600;margin-right:4px}
 .scr .botb{position:absolute;left:16px;right:16px;bottom:max(34px,env(safe-area-inset-bottom,0px))}
 .scr .botb .btn{margin:0}
-.scr .botb small{display:block;text-align:center;font-size:12px;color:#8e9198;margin-top:10px;line-height:1.4}
+.scr .botb small{display:block;text-align:center;font-size:12px;color:#8e9198;margin-top:10px}
 .scr .banner{position:absolute;left:16px;right:16px;top:138px;height:64px;border-radius:22px;background:rgba(255,159,10,.12);border:1px solid rgba(255,159,10,.35);display:flex;align-items:center;gap:12px;padding:0 16px;color:#ff9f0a;font-size:14px;font-weight:650}
 .scr .banner small{display:block;color:#c7a46a;font-weight:500;font-size:12px;margin-top:2px}
 .scr .qbig{position:absolute;left:16px;right:16px;top:216px;border-radius:30px;background:#16181c;padding:18px 20px}
@@ -125,9 +125,17 @@
 .mac .mbar .r{margin-left:auto;display:flex;gap:14px;align-items:center}
 .mac .mmenu{position:absolute;right:120px;top:32px;width:320px;border-radius:14px;padding:14px;color:#fff;background:rgba(40,42,46,.6);backdrop-filter:blur(30px) saturate(1.6);border:1px solid rgba(255,255,255,.14);box-shadow:0 20px 50px rgba(0,0,0,.5)}
 
-body.fd-shot{margin:0;background:#0b0c0e}
+body.fd-shot{margin:0;background:#121417;font-synthesis:weight style small-caps}
 body.fd-shot .shell,body.fd-shot #toast,body.fd-shot dialog,body.fd-shot .winbar{display:none!important}
-body.fd-shot .shot-root{margin:0}
+body.fd-shot .shot-root{position:relative;margin:0;font-synthesis:weight style small-caps}
+body.fd-shot .scr{border-radius:55px;font-family:Inter,"SF Pro Display",system-ui,sans-serif;font-synthesis:weight style small-caps}
+body.fd-shot .scr .seg{top:58px}
+body.fd-shot .scr .botb{bottom:34px}
+body.fd-shot .scr .btn{width:auto;padding:0;border:0}
+body.fd-shot .win,body.fd-shot .fly,body.fd-shot .toast{font-family:"Segoe UI Variable","Segoe UI",Inter,sans-serif;font-synthesis:weight style small-caps}
+body.fd-shot .shot-overlay{position:absolute;z-index:6;margin:0}
+body.fd-shot .shot-overlay.fly{left:788px;bottom:-32px;width:340px}
+body.fd-shot .shot-overlay.toast{left:768px;bottom:-32px;width:360px}
 
 body.phone-ui{background:#0b0c0e}
 body.phone-ui .rail,body.phone-ui .topbar,body.phone-ui .site-footer,body.phone-ui .winbar{display:none}

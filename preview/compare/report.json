@@ -3,72 +3,96 @@
     "id": "i1",
     "width": 393,
     "height": 852,
-    "mismatch": 40.52
+    "mismatch": 3.13,
+    "mean": 1.078,
+    "harsh": 0.527
   },
   {
     "id": "i2",
     "width": 393,
     "height": 852,
-    "mismatch": 50.68
+    "mismatch": 1.47,
+    "mean": 0.493,
+    "harsh": 0.159
   },
   {
     "id": "i3",
     "width": 393,
     "height": 852,
-    "mismatch": 44.15
+    "mismatch": 2.19,
+    "mean": 0.702,
+    "harsh": 0.321
   },
   {
     "id": "i4",
     "width": 393,
     "height": 852,
-    "mismatch": 43.37
+    "mismatch": 1.08,
+    "mean": 0.371,
+    "harsh": 0.157
   },
   {
     "id": "i5",
     "width": 393,
     "height": 852,
-    "mismatch": 27.73
+    "mismatch": 1.09,
+    "mean": 0.411,
+    "harsh": 0.159
   },
   {
     "id": "i6",
     "width": 393,
     "height": 852,
-    "mismatch": 23.1
+    "mismatch": 1.24,
+    "mean": 0.419,
+    "harsh": 0.167
   },
   {
     "id": "w1",
     "width": 1000,
     "height": 640,
-    "mismatch": 11.94
+    "mismatch": 4.51,
+    "mean": 1.084,
+    "harsh": 0.71
   },
   {
     "id": "w2",
     "width": 1000,
     "height": 640,
-    "mismatch": 8.3
+    "mismatch": 3.78,
+    "mean": 0.759,
+    "harsh": 0.304
   },
   {
     "id": "w3",
     "width": 1000,
     "height": 640,
-    "mismatch": 7.53
+    "mismatch": 3.33,
+    "mean": 0.777,
+    "harsh": 0.414
   },
   {
     "id": "w1fly",
     "width": 340,
     "height": 205,
-    "mismatch": 14.45
+    "mismatch": 14.4,
+    "mean": 4.717,
+    "harsh": 5.131
   },
   {
     "id": "w3toast",
     "width": 360,
     "height": 88,
-    "mismatch": 15.29
+    "mismatch": 12.38,
+    "mean": 4.862,
+    "harsh": 4.249
   },
   {
     "id": "m1",
     "width": 900,
     "height": 560,
-    "mismatch": 5.43
+    "mismatch": 0.3,
+    "mean": 0.132,
+    "harsh": 0.072
   }
 ]
