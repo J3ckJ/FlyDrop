@@ -1,5 +1,6 @@
 import http from 'node:http';
 import https from 'node:https';
+import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +11,8 @@ import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
 import QRCode from 'qrcode';
 import { emptyVault, generateTLS, mobileProfile, openVault, digest, newSecret } from './security.js';
+import { createModes } from './modes/service.js';
+import { spawnPlan } from './modes/convert.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url)), HOUR = 3600000, MAX_FILE = 1024 ** 3;
 const loopback = ip => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(ip);
@@ -30,8 +33,8 @@ export function networkInterfaces() {
   const virtual = /virtual|vethernet|wsl|loopback|tap|tunnel|vpn|tailscale|wireguard|docker|hamachi/i;
   return Object.entries(os.networkInterfaces()).flatMap(([name, entries]) => (entries || []).filter(v => v.family === 'IPv4' && !v.internal && privateIP(v.address)).map(v => ({ name, address: v.address, virtual: virtual.test(name) }))).sort((a, b) => Number(a.virtual) - Number(b.virtual));
 }
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
-const STATIC = new Set(['/', '/app.js', '/i18n.js', '/setup.js', '/style.css', '/icon.svg', '/manifest.webmanifest', '/sw.js', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png']);
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2' };
+const STATIC = new Set(['/', '/app.js', '/i18n.js', '/setup.js', '/style.css', '/icon.svg', '/manifest.webmanifest', '/sw.js', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png', '/modes.js', '/modes.css', '/sha256.js', '/shot-fixtures.js', '/tray.html', '/tray.js', '/fonts/InterVariable.woff2', '/fonts/JetBrainsMono-Regular.woff2', '/fonts/JetBrainsMono-Medium.woff2']);
 function imageType(header, size) {
   if (size > 20 * 1024 ** 2) return null;
   if (header.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) return 'image/png';
@@ -40,7 +43,7 @@ function imageType(header, size) {
   return null;
 }
 
-export async function createApp({ port = 0, securePort = 0, host = '0.0.0.0', maxFile = MAX_FILE, ttl = HOUR, vaultStore, tls, onReceived = () => {}, onPairing = () => {}, onPresence = () => {} } = {}) {
+export async function createApp({ port = 0, securePort = 0, host = '0.0.0.0', maxFile = MAX_FILE, ttl = HOUR, vaultStore, tls, onReceived = () => {}, onPairing = () => {}, onPresence = () => {}, onNotice = () => {}, now, unloadChunk, unloadRoot, dataDirectory, runPlan } = {}) {
   const store = vaultStore || { value: emptyVault(), save: async () => {}, flush: async () => {} }, vault = store.value;
   const networks = networkInterfaces(), addresses = [...new Set(networks.map(n => n.address))];
   const material = tls || await generateTLS(vault, addresses); await store.save();
@@ -68,10 +71,22 @@ export async function createApp({ port = 0, securePort = 0, host = '0.0.0.0', ma
     return [...saved, ...[...devices.values()].filter(v => !v.isHost && !ids.has(v.id)).map(v => ({ id: v.id, name: v.name, type: v.type, remembered: false, expiresAt: v.expiresAt, online: Boolean(v.streams.size) }))];
   };
   const links = () => networks.map(n => ({ ...n, url: `https://${n.address}:${actualSecurePort}/#pair=${invitation.key}`, setupUrl: `http://${n.address}:${actualPort}/setup` }));
+  const modes = await createModes({
+    vault, store, fault, directory, dataDirectory, unloadRoot, hostDevice, devices, emit, now, chunkSize: unloadChunk, onNotice, securePort: () => actualSecurePort,
+    runPlan: runPlan === null ? null : (runPlan || (plan => new Promise((resolve, reject) => {
+      let child;
+      try { child = spawnPlan(spawn, plan); } catch (error) { reject(error); return; }
+      let stderr = '';
+      child.stderr?.on('data', chunk => { stderr += chunk; });
+      child.on('error', reject);
+      child.on('close', code => code === 0 ? resolve() : reject(new Error(String(stderr).slice(0, 400) || 'Конвертер завершился с ошибкой. Оригинал сохранён')));
+    }))),
+  });
   const state = device => ({
     self: { id: device.id, name: device.name, type: device.type, isHost: device.isHost }, devices: online().filter(v => v.id !== device.id),
     inbox: device.inbox.filter(v => v.expiresAt > Date.now()), outbox: device.outbox.filter(v => v.expiresAt > Date.now()), maxFile, links: device.isHost ? links() : [],
     security: { encryptedRemote: true, approvalRequired: true, ...(device.isHost ? { fingerprint: material.fingerprint, certificateName: `FlyDrop Local ${vault.hostId.slice(0, 8)}`, pairingCode: invitation.code, pairingExpiresAt: invitation.expiresAt, requests: liveRequests(), trusted: trustedList() } : {}) }, settings: device.isHost ? vault.settings : undefined,
+    buffer: modes.view(device), unload: modes.unloadView(),
   });
   const issueSession = (req, res, device) => {
     const existingToken = cookie(req, req.socket.encrypted ? '__Host-flydrop-session' : 'flydrop-local');
@@ -103,7 +118,7 @@ export async function createApp({ port = 0, securePort = 0, host = '0.0.0.0', ma
   }
   async function revoke(id) {
     if (id === hostDevice.id) throw fault(400, 'Нельзя отозвать доступ у этого компьютера');
-    vault.trusted = vault.trusted.filter(v => v.id !== id); await store.save();
+    vault.trusted = vault.trusted.filter(v => v.id !== id); await modes.forgetDevice(id); await store.save();
     for (const [token, session] of sessions) if (session.deviceId === id) sessions.delete(token);
     for (const request of pending.values()) if (request.deviceId === id) request.status = 'rejected';
     const device = devices.get(id);
@@ -177,7 +192,7 @@ export async function createApp({ port = 0, securePort = 0, host = '0.0.0.0', ma
   }
   const handler = async (req, res) => {
     res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'no-referrer'); res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'");
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'");
     try {
       const secure = Boolean(req.socket.encrypted), scheme = secure ? 'https' : 'http', authority = req.headers.host || '', url = new URL(req.url, `${scheme}://${authority}`);
       if (!allowedHosts.has(url.hostname) || Number(url.port || (secure ? 443 : 80)) !== (secure ? actualSecurePort : actualPort)) throw fault(403, 'Адрес не разрешён');
@@ -186,7 +201,7 @@ export async function createApp({ port = 0, securePort = 0, host = '0.0.0.0', ma
       if (req.headers['sec-fetch-site'] === 'cross-site') throw fault(403, 'Запрос с другого сайта запрещён');
       if (req.method === 'POST' && req.headers.origin !== origin) throw fault(403, 'Требуется приложение FlyDrop');
       if (!secure && !local(req) && !['/setup', '/setup.js', '/i18n.js', '/certificate.mobileconfig', '/ca.cer', '/style.css', '/icon.svg'].includes(url.pathname)) throw fault(426, 'Для передачи требуется HTTPS. Настройте сертификат на /setup');
-      if (req.method === 'GET' && url.pathname === '/health') { json(res, 200, { app: 'FlyDrop', version: '0.3.0', securePort: actualSecurePort }); return; }
+      if (req.method === 'GET' && url.pathname === '/health') { json(res, 200, { app: 'FlyDrop', version: '0.4.0', securePort: actualSecurePort }); return; }
       if (req.method === 'GET' && url.pathname === '/setup') { res.writeHead(200, { 'Content-Type': MIME['.html'] }); res.end(await readFile(path.join(ROOT, 'public', 'setup.html'))); return; }
       if (req.method === 'GET' && ['/certificate.mobileconfig', '/ca.cer'].includes(url.pathname)) {
         const profile = url.pathname.endsWith('.mobileconfig'); res.writeHead(200, { 'Content-Type': profile ? 'application/x-apple-aspen-config' : 'application/pkix-cert', 'Content-Disposition': `attachment; filename="${profile ? 'FlyDrop.mobileconfig' : 'FlyDrop.cer'}"` }); res.end(profile ? mobileProfile(material, vault.hostId) : new X509Certificate(material.ca).raw); return;
@@ -220,6 +235,10 @@ export async function createApp({ port = 0, securePort = 0, host = '0.0.0.0', ma
         const device = devices.get(request.deviceId); if (!device) throw fault(403, 'Доступ отозван');
         if (request.trustToken) setCookie(res, '__Host-flydrop-trust', request.trustToken, true, 30 * 86400);
         issueSession(req, res, device); pending.delete(request.id); json(res, 200, state(device)); return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/buffer/ingest') {
+        if (!secure) throw fault(426, 'Для передачи требуется HTTPS');
+        await modes.ingest(req, res); return;
       }
       if (!url.pathname.startsWith('/api/')) throw fault(404, 'Не найдено'); const device = authenticate(req);
       if (req.method === 'GET' && url.pathname === '/api/state') { json(res, 200, state(device)); return; }
@@ -265,6 +284,7 @@ export async function createApp({ port = 0, securePort = 0, host = '0.0.0.0', ma
         const file = files.get(fileAction[2]), preview = fileAction[1] === 'preview'; if (!file || file.expiresAt <= Date.now()) throw fault(404, 'Срок хранения файла истёк'); if (file.recipient !== device.id) throw fault(403, 'Этот файл адресован другому устройству'); if (preview && !file.preview) throw fault(415, 'Предпросмотр доступен для небольших PNG, JPEG и WebP');
         await stat(file.path); const ascii = file.name.replace(/[^a-zA-Z0-9._-]/g, '_'), encoded = encodeURIComponent(file.name).replace(/['()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`); res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox"); res.writeHead(200, { 'Content-Type': preview ? file.preview : 'application/octet-stream', 'Content-Length': file.size, 'Content-Disposition': `${preview ? 'inline' : 'attachment'}; filename="${ascii}"; filename*=UTF-8''${encoded}` }); await pipeline(createReadStream(file.path), res); return;
       }
+      if (await modes.route(req, res, { device, url })) return;
       throw fault(404, 'Не найдено');
     } catch (error) { if (!res.headersSent && !res.destroyed) json(res, error.status || 500, { error: error.status ? error.message : 'Ошибка сервера. Попробуйте ещё раз' }); else if (!res.writableEnded) res.destroy(); if (!error.status && !['ERR_STREAM_PREMATURE_CLOSE', 'ECONNRESET', 'ABORT_ERR'].includes(error.code)) console.error(error.message); }
   };
@@ -276,6 +296,7 @@ export async function createApp({ port = 0, securePort = 0, host = '0.0.0.0', ma
   } catch (error) { server.closeAllConnections(); server.close(); secureServer.close(); await rm(directory, { recursive: true, force: true }); throw error; }
   async function sweep() {
     const now = Date.now(); for (const file of files.values()) if (file.expiresAt <= now) await removeFile(file);
+    await modes.sweep();
     for (const [token, session] of sessions) if (session.expiresAt <= now) sessions.delete(token); for (const [id, request] of pending) if (request.expiresAt <= now) pending.delete(id); for (const [ip, attempt] of attempts) if (attempt.until <= now) attempts.delete(ip); for (const [token, expiresAt] of browserTickets) if (expiresAt <= now) browserTickets.delete(token);
     for (const device of devices.values()) { device.inbox = device.inbox.filter(v => v.expiresAt > now); device.outbox = device.outbox.filter(v => v.expiresAt > now); for (const stream of device.streams) { if (stream.sessionExpiry <= now) { stream.end(); device.streams.delete(stream); } else if (!stream.destroyed && !stream.writableEnded) stream.write(': heartbeat\n\n'); } if (!device.isHost && !device.streams.size && !device.uploading && now - device.lastSeen > 24 * HOUR) devices.delete(device.id); }
     for (const trust of [...vault.trusted]) if (trust.expiresAt <= now) await revoke(trust.id);
@@ -284,6 +305,8 @@ export async function createApp({ port = 0, securePort = 0, host = '0.0.0.0', ma
   return {
     server, secureServer, desktopKey, port: actualPort, securePort: actualSecurePort, material, directory, vault, store, sweep, getState: () => state(hostDevice), sendClipboard: text => textTo(hostDevice, vault.settings.lastRecipient, text), sendLocalFiles,
     browserLink() { const token = newSecret(); if (browserTickets.size >= 32) browserTickets.clear(); browserTickets.set(digest(token), Date.now() + 120000); return `http://localhost:${actualPort}/#desktop=${token}`; },
+    buffer: { fromHost: input => modes.fromHost(input) },
+    unloadRoot: () => modes.rootDir(),
     async incomingFile(id) { const file = files.get(id); if (!file || file.recipient !== hostDevice.id || file.expiresAt <= Date.now()) throw new Error('Файл недоступен'); return { path: file.path, name: file.name }; },
     async close() { if (closing) return; closing = true; clearInterval(timer); for (const device of devices.values()) for (const stream of device.streams) stream.end(); for (const s of [server, secureServer]) s.closeAllConnections(); await Promise.all([new Promise(resolve => server.close(resolve)), new Promise(resolve => secureServer.close(resolve))]); await store.flush(); await rm(directory, { recursive: true, force: true }); },
   };
@@ -293,6 +316,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   let app;
   try { const vaultStore = await openVault(path.join(process.env.APPDATA || os.homedir(), 'FlyDrop', 'security')); app = await createApp({ port, securePort, vaultStore }); }
   catch (error) { console.error(error.code === 'EADDRINUSE' ? `Порт ${port}/${securePort} занят. Откройте http://localhost:${port} или закройте старый FlyDrop.` : `Не удалось запустить FlyDrop: ${error.message}`); process.exit(1); }
-  console.log(`\n  FlyDrop 0.3.0 — HTTPS + подтверждение устройств\n  Windows: http://localhost:${app.port}\n  iPhone: настройте сертификат, затем используйте HTTPS QR-код.\n  Ctrl+C для выхода.\n`);
+  console.log(`\n  FlyDrop 0.4.0 — буфер, выгрузка, HTTPS\n  Windows: http://localhost:${app.port}\n  iPhone: настройте сертификат, затем используйте HTTPS QR-код.\n  Ctrl+C для выхода.\n`);
   for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, async () => { await app.close(); process.exit(0); });
 }

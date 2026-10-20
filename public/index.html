@@ -2,11 +2,11 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#f7f8f5"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="FlyDrop"><meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="theme-color" content="#0b0c0e"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="FlyDrop"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="description" content="Передавайте файлы и текст между Windows и iPhone в одной Wi-Fi сети.">
   <title>FlyDrop — рядом, значит на связи</title>
   <link rel="icon" href="/icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/icons/apple-touch-icon.png"><link rel="manifest" href="/manifest.webmanifest">
-  <link rel="stylesheet" href="/style.css"><script src="/app.js" type="module"></script>
+  <link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/modes.css"><script src="/app.js" type="module"></script>
 </head>
 <body>
   <svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
@@ -24,17 +24,21 @@
     <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v.01"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
   </defs></svg>
+  <header id="winbar" class="winbar" hidden><span class="lg" aria-hidden="true"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><path d="M12 19V5M6 11l6-6 6 6"/></svg></span><span>FlyDrop</span><button id="win-lang" class="lang" type="button">RU / EN</button><span class="wc"><button id="win-min" type="button" aria-label="Свернуть">—</button><button id="win-max" type="button" aria-label="Развернуть">☐</button><button id="win-close" type="button" aria-label="Закрыть">✕</button></span></header>
+  <nav id="phone-jump" class="phone-jump" hidden><a href="#transfer" data-view="transfer">Передача</a><a href="#buffer" data-view="buffer">Буфер</a><a href="#upload" data-view="upload">Выгрузка</a></nav>
   <div class="shell">
     <aside class="rail">
       <a class="brand" href="#transfer" data-view="transfer" aria-label="FlyDrop"><img src="/icon.svg" alt="" width="38" height="38"><span>FlyDrop</span></a>
       <div class="rail-label" data-i18n="nav.space">ВАШЕ ПРОСТРАНСТВО</div>
       <nav class="rail-nav" data-i18n-aria="nav.menu" aria-label="Разделы">
       <a class="nav-item active" href="#transfer" data-view="transfer" aria-current="page"><svg><use href="#i-send"/></svg><span data-i18n="nav.transfer">Передача</span></a>
+      <a class="nav-item" href="#buffer" data-view="buffer"><svg><use href="#i-copy"/></svg><span data-i18n="nav.buffer">Буфер</span><span class="badge-new">новое</span></a>
+      <a class="nav-item" href="#upload" data-view="upload"><svg><use href="#i-upload"/></svg><span data-i18n="nav.upload">Выгрузка</span><span class="badge-new">новое</span></a>
       <a class="nav-item" href="#inbox" data-view="inbox"><svg><use href="#i-download"/></svg><span data-i18n="nav.inbox">Входящие</span><span id="inbox-count" class="count">0</span></a>
       <a class="nav-item" href="#security" data-view="security"><svg><use href="#i-check"/></svg><span data-i18n="nav.security">Безопасность</span></a>
       <a class="nav-item" href="#how" data-view="how"><svg><use href="#i-info"/></svg><span data-i18n="nav.how">Как это работает</span></a>
       </nav>
-      <div class="rail-bottom"><div class="local-symbol"><svg><use href="#i-wifi"/></svg></div><strong data-i18n-html="rail.title">Небольшое расстояние.<br>Большие возможности.</strong><p data-i18n-html="rail.text">Ваши устройства.<br>Ваша Wi-Fi сеть.</p><span class="version">FLYDROP / LOCAL · 0.3.0</span></div>
+      <div class="rail-bottom"><div class="local-symbol"><svg><use href="#i-wifi"/></svg></div><strong data-i18n-html="rail.title">Небольшое расстояние.<br>Большие возможности.</strong><p data-i18n-html="rail.text">Ваши устройства.<br>Ваша Wi-Fi сеть.</p><span class="version">FLYDROP / LOCAL · 0.4.0</span></div>
     </aside>
     <div class="workspace">
       <header class="topbar"><span class="breadcrumb"><span data-i18n="crumb">Ваши устройства</span> <span>/</span> <span id="crumb-page">Передача</span></span><div class="header-right"><button id="language-toggle" class="lang-toggle" type="button">EN</button><span id="connection-status" class="status"><i></i><span data-i18n="status.connecting">Подключение…</span></span><button id="device-name-button" class="device-name" data-i18n-title="rename" title="Изменить имя устройства"><svg><use id="self-icon" href="#i-computer"/></svg><span id="self-name" data-i18n="self">Это устройство</span></button></div></header>
@@ -77,6 +81,8 @@
             <section class="card connect-card"><div class="card-heading"><div><h2 id="connect-title" data-i18n="connect.title">Ещё одно устройство</h2><p id="connect-subtitle" data-i18n="connect.sub">Одна сеть. Одно сканирование.</p></div><span class="step-number">02</span></div><div id="host-connect"><div class="qr-wrap"><img id="qr" data-i18n-aria="qr.alt" alt="QR-код для подключения к FlyDrop" width="180" height="180"></div><h3 data-i18n="qr.heading">Наведите камеру iPhone</h3><p class="connect-description" data-i18n="qr.text">Откройте защищённую ссылку в Safari и подтвердите устройство на Windows.</p><div id="network-choice" hidden><label for="network" data-i18n="network.label">Сетевой адрес компьютера</label><select id="network"></select></div><div class="link-row"><code id="local-url"></code><button id="copy-link" data-i18n-title="copyLink" data-i18n-aria="copyLink" title="Скопировать ссылку подключения" aria-label="Скопировать ссылку подключения"><svg><use href="#i-copy"/></svg></button></div><div id="no-network" class="connection-warning" data-i18n="noNetwork" hidden>Не найдена локальная сеть. Подключите компьютер к Wi-Fi и перезапустите FlyDrop.</div></div><div id="guest-connect" hidden><div class="connected-art"><svg><use href="#i-computer"/></svg><span class="connection-dashes">•••</span><svg><use href="#i-phone"/></svg></div><h3 data-i18n="guest.heading">Вы в пространстве FlyDrop</h3><p class="connect-description" data-i18n="guest.text">Выберите компьютер в получателях. Файлы и текст можно отправлять в обе стороны.</p></div><div class="connection-tip"><svg><use href="#i-info"/></svg><p data-i18n="tip">Сохраните вкладку открытой на обоих устройствах во время передачи.</p></div></section>
           </div>
           </div>
+          <div id="view-buffer" class="view" hidden></div>
+          <div id="view-upload" class="view" hidden></div>
           <div id="view-inbox" class="view" hidden>
           <section id="inbox" class="inbox-section"><div class="section-heading"><div><h2 data-i18n="inbox.title">Входящие</h2><p data-i18n="inbox.sub">Всё, что отправили на это устройство</p></div><span class="subtle-tag" data-i18n="inbox.keep">Хранятся 1 час</span></div><div id="inbox-items" class="transfer-list"></div><div id="empty-inbox" class="empty-inbox"><span class="empty-icon"><svg><use href="#i-download"/></svg></span><div><strong data-i18n="empty.title">Здесь скоро что-нибудь появится</strong><p data-i18n="empty.text">Отправьте файл или текст с другого устройства</p></div><span class="empty-dots" aria-hidden="true">· · ·</span></div></section>
           <section id="outbox-section" class="outbox-section" hidden><div class="section-heading"><div><h2 data-i18n="outbox.title">Отправлено</h2><p data-i18n="outbox.sub">Передано на другое устройство</p></div></div><div id="outbox-items" class="transfer-list"></div></section>

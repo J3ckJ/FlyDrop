@@ -1,14 +1,27 @@
 {
   "id": "/",
-  "name": "FlyDrop — файлы и текст",
+  "name": "FlyDrop — буфер и выгрузка",
   "short_name": "FlyDrop",
-  "description": "Передача файлов и текста между iPhone и Windows в вашей сети",
+  "description": "Буфер и фото между iPhone и Windows в вашей сети",
   "lang": "ru",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f7f8f5",
-  "theme_color": "#f7f8f5",
+  "background_color": "#0b0c0e",
+  "theme_color": "#0b0c0e",
+  "share_target": {
+    "action": "/share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        { "name": "media", "accept": ["image/*", "video/*", ".heic", ".mov", ".mp4"] }
+      ]
+    }
+  },
   "icons": [
     { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
     { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }

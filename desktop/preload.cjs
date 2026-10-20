@@ -12,4 +12,12 @@ contextBridge.exposeInMainWorld('flydropDesktop', {
   onTransferLock: callback => { const listener = (_event, locked) => callback(locked); ipcRenderer.on('flydrop:transfer-lock', listener); return () => ipcRenderer.removeListener('flydrop:transfer-lock', listener); },
   onMessage: callback => { const listener = (_event, text) => callback(text); ipcRenderer.on('flydrop:message', listener); return () => ipcRenderer.removeListener('flydrop:message', listener); },
   setLanguage: lang => ipcRenderer.invoke('flydrop:language', lang),
+  sendToPhone: () => ipcRenderer.invoke('flydrop:send-buffer'),
+  chooseUnloadFolder: () => ipcRenderer.invoke('flydrop:unload-folder'),
+  openPath: folder => ipcRenderer.invoke('flydrop:open-path', folder),
+  windowControls: {
+    minimize: () => ipcRenderer.invoke('flydrop:win', 'minimize'),
+    toggleMax: () => ipcRenderer.invoke('flydrop:win', 'maximize'),
+    close: () => ipcRenderer.invoke('flydrop:win', 'close'),
+  },
 });

@@ -4,6 +4,8 @@ node_modules/
 .DS_Store
 artifacts/
 release/
+vendor/converters/*
+!vendor/converters/README.md
 *.dpapi
 *.safe
 *.pem

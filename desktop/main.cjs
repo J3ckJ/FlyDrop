@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, clipboard, Notification, ipcMain, dialog, shell, safeStorage } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
+const { existsSync, mkdirSync, writeFileSync } = require('node:fs');
 const os = require('node:os');
 const { randomUUID } = require('node:crypto');
 const { pathToFileURL } = require('node:url');
@@ -8,9 +9,10 @@ const { saveIncoming } = require('./files.cjs');
 const { createClipboardActions, readClipboard } = require('./clipboard.cjs');
 const { zipDirectory } = require('./zip.cjs');
 const smoke = process.argv.includes('--smoke-test');
+const selftest = process.argv.includes('--selftest');
 const smokeProfile = smoke ? require('node:fs').mkdtempSync(path.join(os.tmpdir(), 'flydrop-smoke-profile-')) : null;
 if (smokeProfile) app.setPath('userData', smokeProfile);
-let window, tray, service, quitting = false, shortcuts = false, stagedFiles = [], transferActive = false, transferCancel = () => {}, uiLang = 'ru', presence = { names: [], uploading: false };
+let window, tray, trayMenu, flyout, service, quitting = false, shortcuts = false, stagedFiles = [], transferActive = false, transferCancel = () => {}, uiLang = 'ru', presence = { names: [], uploading: false };
 let origin;
 function post(channel, ...args) { if (window && !window.isDestroyed()) window.webContents.send(channel, ...args); }
 function stageFiles(files) {
@@ -68,7 +70,23 @@ async function materializeClipboard(value) {
 }
 app.enableSandbox();
 app.setAppUserModelId('local.flydrop.windows');
-if (!smoke && !app.requestSingleInstanceLock()) { app.quit(); }
+function publishSelfTest(text) {
+  const body = text.endsWith('\n') ? text : `${text}\n`;
+  console.log(body);
+  const target = process.env.FLYDROP_SELFTEST_OUT;
+  if (!target) return;
+  try { mkdirSync(path.dirname(target), { recursive: true }); writeFileSync(target, body); } catch (error) { console.error(error); }
+}
+if (selftest) {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch('disable-gpu');
+  app.whenReady().then(async () => {
+    const { runSelfTest } = await import(pathToFileURL(path.join(app.getAppPath(), 'modes', 'selftest.js')).href);
+    const result = await runSelfTest();
+    publishSelfTest(`${result.log}\nFLYDROP_SELFTEST_OK`);
+    app.exit(0);
+  }).catch(error => { publishSelfTest(`${error.stack || error.message || error}\nFLYDROP_SELFTEST_FAIL`); app.exit(1); });
+} else if (!smoke && !app.requestSingleInstanceLock()) { app.quit(); }
 else {
   app.on('second-instance', () => show());
   app.whenReady().then(start).catch(error => {
@@ -111,18 +129,65 @@ function trayTip() {
   if (!presence.names.length) return en ? 'FlyDrop — waiting for a device' : 'FlyDrop — ждём устройство';
   return `FlyDrop — ${presence.names.join(', ')} ${en ? 'connected' : 'на связи'}`.slice(0, 120);
 }
+function shotName(type) {
+  const stamp = new Date(), pad = n => String(n).padStart(2, '0');
+  const ext = type === 'image/jpeg' ? 'jpg' : 'png';
+  return `Снимок экрана ${stamp.getFullYear()}-${pad(stamp.getMonth() + 1)}-${pad(stamp.getDate())} ${pad(stamp.getHours())}${pad(stamp.getMinutes())}${pad(stamp.getSeconds())}.${ext}`;
+}
+async function readFresh() {
+  return readClipboard({ readItems: clipboardItems, readText: () => clipboard.readText(), zipFolder: packFolder });
+}
+async function sendToPhone() {
+  if (!service?.buffer) return;
+  try {
+    const value = await readFresh();
+    if (value.kind === 'files') { await quickSend(); return; }
+    if (value.kind === 'image') {
+      await service.buffer.fromHost({ kind: 'image', bytes: value.bytes, mime: value.type, name: shotName(value.type), source: 'hotkey' });
+      notify('FlyDrop', uiLang === 'en' ? 'Screenshot is waiting on iPhone' : 'Снимок ждёт на iPhone');
+      return;
+    }
+    const text = value.text.slice(0, 50000);
+    const item = await service.buffer.fromHost({ kind: 'text', text, source: 'hotkey' });
+    notify('FlyDrop', item.sensitive ? (uiLang === 'en' ? 'Secret is hidden and will disappear' : 'Секрет скрыт и скоро исчезнет') : (uiLang === 'en' ? 'Text is waiting on iPhone' : 'Текст ждёт на iPhone'));
+  } catch (error) {
+    show();
+    message(error.message || (uiLang === 'en' ? 'Could not read the clipboard' : 'Не удалось прочитать буфер'));
+  }
+}
+function previewText(value) {
+  if (!value) return { preview: uiLang === 'en' ? 'Clipboard is empty' : 'Буфер пуст', detail: '' };
+  if (value.kind === 'text') return { preview: value.text.slice(0, 180), detail: uiLang === 'en' ? `${value.text.length} characters` : `${value.text.length} символов` };
+  if (value.kind === 'image') return { preview: uiLang === 'en' ? 'Screenshot' : 'Снимок', detail: uiLang === 'en' ? 'Image' : 'Картинка' };
+  if (value.kind === 'files') return { preview: value.files.map(file => file.name).slice(0, 3).join(', '), detail: uiLang === 'en' ? 'Files go to the selected recipient' : 'Файлы уйдут выбранному получателю' };
+  return { preview: '', detail: '' };
+}
+async function showFlyout() {
+  if (smoke || !service) return;
+  const value = await readFresh().catch(() => null);
+  const card = previewText(value);
+  if (!flyout || flyout.isDestroyed()) {
+    flyout = new BrowserWindow({ width: 360, height: 230, frame: false, transparent: true, resizable: false, movable: true, skipTaskbar: true, alwaysOnTop: true, show: false, backgroundColor: '#00000000', webPreferences: { preload: path.join(__dirname, 'tray-preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true } });
+    flyout.on('blur', () => { if (flyout && !flyout.isDestroyed()) flyout.hide(); });
+    await flyout.loadURL(`${origin}/tray.html`);
+  }
+  const bounds = tray?.getBounds?.() || { x: 40, y: 40, width: 0, height: 0 };
+  flyout.setPosition(Math.max(8, Math.round(bounds.x + bounds.width - 360)), Math.max(8, Math.round(bounds.y - 240)));
+  flyout.show();
+  flyout.webContents.send('tray:preview', { ...card, online: presence.names.length > 0 });
+}
 function refreshTray() {
   if (!tray) return;
   const en = uiLang === 'en';
   tray.setToolTip(trayTip());
-  tray.setContextMenu(Menu.buildFromTemplate([
+  trayMenu = Menu.buildFromTemplate([
     { label: en ? 'Open FlyDrop' : 'Открыть FlyDrop', click: show },
     { label: en ? 'Open in browser' : 'Открыть в браузере', click: () => shell.openExternal(service.browserLink()) },
     { label: en ? 'From clipboard — Ctrl+Shift+Space' : 'Из буфера — Ctrl+Shift+Space', click: compose },
-    { label: en ? 'Send clipboard to the selected recipient' : 'Отправить буфер выбранному получателю', click: quickSend },
+    { label: en ? 'To iPhone — Ctrl+Shift+Enter' : 'Отправить на iPhone — Ctrl+Shift+Enter', click: () => void sendToPhone() },
     { type: 'separator' },
     { label: en ? 'Quit' : 'Выход', click: () => app.quit() },
-  ]));
+  ]);
 }
 function externalPage(url) {
   if (url === `${origin}/setup`) return url;
@@ -146,14 +211,24 @@ async function start() {
   const encryption = { encrypt: value => safeStorage.encryptString(Buffer.from(value).toString('utf8')), decrypt: value => Buffer.from(safeStorage.decryptString(Buffer.from(value)), 'utf8') };
   const storeDirectory = smokeDirectory || path.join(process.env.APPDATA || app.getPath('userData'), 'FlyDrop', 'security');
   const store = await openVault(storeDirectory, encryption);
+  const bundledFfmpeg = path.join(process.resourcesPath, 'converters', 'ffmpeg.exe');
+  const devFfmpeg = path.join(app.getAppPath(), 'vendor', 'converters', 'ffmpeg.exe');
+  if (!process.env.FLYDROP_FFMPEG && existsSync(bundledFfmpeg)) process.env.FLYDROP_FFMPEG = bundledFfmpeg;
+  else if (!process.env.FLYDROP_FFMPEG && existsSync(devFfmpeg)) process.env.FLYDROP_FFMPEG = devFfmpeg;
+  const bundledHeif = path.join(process.resourcesPath, 'converters', 'heif-convert.exe');
+  const devHeif = path.join(app.getAppPath(), 'vendor', 'converters', 'heif-convert.exe');
+  if (!process.env.FLYDROP_HEIF && existsSync(bundledHeif)) process.env.FLYDROP_HEIF = bundledHeif;
+  else if (!process.env.FLYDROP_HEIF && existsSync(devHeif)) process.env.FLYDROP_HEIF = devHeif;
   service = await createApp({ port: smoke ? 0 : 4317, securePort: smoke ? 0 : 4318, vaultStore: store,
     onReceived: item => { notify(uiLang === 'en' ? 'New in FlyDrop' : 'Новое в FlyDrop', item.kind === 'file' ? (uiLang === 'en' ? `File from ${item.from}` : `Файл от ${item.from}`) : (uiLang === 'en' ? `Text from ${item.from}` : `Текст от ${item.from}`)); if (item.kind === 'file' && service.vault.settings.autoSave === true) void saveReceived(item); },
+    onNotice: notice => notify(notice?.title || 'FlyDrop', notice?.body || ''),
     onPresence: next => { presence = next || presence; if (tray) tray.setToolTip(trayTip()); },
     onPairing: request => { notify('Запрос подключения', `${request.name}. Сверьте код в FlyDrop`); if (!smoke) show(); },
   });
   origin = `http://127.0.0.1:${service.port}`;
   if (!service.vault.settings.downloadsFolder) { service.vault.settings.downloadsFolder = path.join(app.getPath('downloads'), 'FlyDrop'); await store.save(); }
-  window = new BrowserWindow({ width: 1280, height: 920, minWidth: 820, minHeight: 640, show: false, title: 'FlyDrop', icon: path.join(app.getAppPath(), 'build', 'icon.ico'), autoHideMenuBar: true, backgroundColor: '#f7f8f5', webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, backgroundThrottling: false, ...(smoke ? { partition: 'flydrop-smoke' } : {}) } });
+  if (!service.vault.settings.unloadFolder) { service.vault.settings.unloadFolder = path.join(app.getPath('downloads'), 'FlyDrop'); await store.save(); }
+  window = new BrowserWindow({ width: 1100, height: 760, minWidth: 820, minHeight: 640, show: false, frame: false, title: 'FlyDrop', icon: path.join(app.getAppPath(), 'build', 'icon.ico'), backgroundColor: '#1b1c1f', webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, backgroundThrottling: false, ...(smoke ? { partition: 'flydrop-smoke' } : {}) } });
   window.webContents.session.setPermissionRequestHandler((_wc, permission, callback, details) => callback(details.requestingUrl?.startsWith(`${origin}/`) && ['clipboard-read', 'clipboard-sanitized-write'].includes(permission)));
   window.webContents.session.setPermissionCheckHandler((_wc, permission, requestingOrigin) => requestingOrigin === origin && ['clipboard-read', 'clipboard-sanitized-write'].includes(permission));
   window.webContents.session.webRequest.onBeforeSendHeaders({ urls: [`${origin}/api/connect`] }, (details, callback) => {
@@ -196,8 +271,32 @@ async function start() {
   });
   handle('flydrop:cancel-transfer', () => { transferCancel(); });
   handle('flydrop:language', lang => { uiLang = lang === 'en' ? 'en' : 'ru'; refreshTray(); return uiLang; });
+  handle('flydrop:win', action => {
+    if (action === 'minimize') window.minimize();
+    else if (action === 'maximize') { if (window.isMaximized()) window.unmaximize(); else window.maximize(); }
+    else if (action === 'close') window.close();
+  });
+  handle('flydrop:send-buffer', () => sendToPhone());
+  handle('flydrop:open-path', async folder => {
+    if (typeof folder !== 'string') throw new Error('Нет папки');
+    const target = path.resolve(folder);
+    const allowed = [service.unloadRoot(), service.vault.settings.downloadsFolder].filter(Boolean).map(item => path.resolve(item));
+    if (!allowed.some(root => target === root || target.startsWith(root + path.sep))) throw new Error('Можно открыть только папку FlyDrop');
+    await shell.openPath(target);
+    return target;
+  });
+  handle('flydrop:unload-folder', async () => {
+    const selection = await dialog.showOpenDialog(window, { title: 'Папка для фото с iPhone', defaultPath: service.unloadRoot(), properties: ['openDirectory', 'createDirectory'] });
+    if (!selection.canceled && selection.filePaths[0]) { service.vault.settings.unloadFolder = path.resolve(selection.filePaths[0]); await store.save(); }
+    return { folder: service.unloadRoot() };
+  });
+  const fromTray = event => flyout && !flyout.isDestroyed() && event.sender.id === flyout.webContents.id;
+  ipcMain.handle('tray:send', async event => { if (!fromTray(event)) throw new Error('Нет доступа'); await sendToPhone(); flyout?.hide(); });
+  ipcMain.handle('tray:open', event => { if (!fromTray(event)) throw new Error('Нет доступа'); show(); flyout?.hide(); });
+  ipcMain.handle('tray:browser', event => { if (!fromTray(event)) throw new Error('Нет доступа'); void shell.openExternal(service.browserLink()); flyout?.hide(); });
+  ipcMain.handle('tray:quit', event => { if (!fromTray(event)) throw new Error('Нет доступа'); app.quit(); });
   if (!smoke) {
-    const composeRegistered = globalShortcut.register('CommandOrControl+Shift+Space', compose), sendRegistered = globalShortcut.register('CommandOrControl+Shift+Enter', quickSend); shortcuts = composeRegistered && sendRegistered;
+    const composeRegistered = globalShortcut.register('CommandOrControl+Shift+Space', compose), sendRegistered = globalShortcut.register('CommandOrControl+Shift+Enter', () => void sendToPhone()); shortcuts = composeRegistered && sendRegistered;
   }
   await window.loadURL(`${origin}/`);
   if (smoke) {
@@ -245,7 +344,7 @@ async function start() {
     console.log('Desktop smoke passed:', JSON.stringify(assertions));
     quitting = true; window.destroy(); await service.close(); await fs.rm(smokeDirectory, { recursive: true, force: true }); app.exit(0); return;
   }
-  tray = new Tray(nativeImage.createFromPath(path.join(app.getAppPath(), 'build', 'tray.png'))); refreshTray(); tray.on('double-click', show);
+  tray = new Tray(nativeImage.createFromPath(path.join(app.getAppPath(), 'build', 'tray.png'))); refreshTray(); tray.on('double-click', show); tray.on('click', () => void showFlyout()); tray.on('right-click', () => { if (trayMenu) tray.popUpContextMenu(trayMenu); });
   if (!process.argv.includes('--hidden')) show();
   const capture = process.argv.find(arg => arg.startsWith('--capture-preview='))?.slice('--capture-preview='.length);
   if (capture) {
